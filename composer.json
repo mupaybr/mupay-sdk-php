@@ -1,5 +1,5 @@
 {
-  "name": "mupay/mupay-sdk",
+  "name": "mupaybr/mupay-sdk",
   "description": "SDK oficial PHP para integrar a API publica da Mupay.",
   "type": "library",
   "license": "MIT",

@@ -3,7 +3,7 @@
 Integre pagamentos Mupay em poucos minutos com um SDK pequeno, tipado e feito para quem quer criar uma cobranca sem estudar a API inteira primeiro.
 
 ```bash
-composer require mupay/mupay-sdk
+composer require mupaybr/mupay-sdk
 ```
 
 Com isso voce ganha:
