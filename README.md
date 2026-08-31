@@ -6,7 +6,8 @@ Integre pagamentos MuPag em poucos minutos com um SDK pequeno, tipado e feito pa
 composer require mupag/mupag-sdk
 ```
 
-> Compatibilidade: o pacote Composer passa a ser `mupag/mupag-sdk`, mas o namespace PHP permanece `MuPag\Sdk`.
+> Compatibilidade: o pacote, o namespace e a classe cliente principal foram renomeados: de
+> `mupaybr/mupay-sdk`, `Mupay\Sdk\Mupay` para `mupag/mupag-sdk`, `MuPag\Sdk\MuPagClient`.
 
 Com isso voce ganha:
 
@@ -97,7 +98,7 @@ fechado quando o merchant exige 3DS.
 
 ```php
 foreach ($mupag->charges->all(['limit' => 50]) as $charge) {
-    echo $charge['id'] . PHP_EOL;
+    echo $charge['charge_id'] . PHP_EOL;
 }
 ```
 
@@ -114,7 +115,8 @@ $subscription = $mupag->subscriptions->cancel(
 );
 ```
 
-O cancelamento usa `POST /v1/subscriptions/{id}/cancel` sem payload. O backend decide a transicao de estado e preserva auditoria.
+O cancelamento usa `POST /v1/subscriptions/{id}/cancel` com um payload contendo `mode` e `reason`.
+O backend decide a transicao de estado e preserva auditoria.
 
 ## Verificar webhook
 
@@ -187,7 +189,7 @@ O repositorio de publicacao e [mupaybr/mupag-sdk-php](https://github.com/mupaybr
 
 ### Migracao para MuPag 0.2.0
 
-Atualize a dependencia e o namespace juntos:
+Atualize a dependencia, o namespace e a classe cliente juntos:
 
 Antes:
 
@@ -196,7 +198,9 @@ composer require mupaybr/mupay-sdk
 ```
 
 ```php
-use Mupay\Sdk\MuPagClient;
+use Mupay\Sdk\Mupay;
+
+$mupay = Mupay::test(getenv('MUPAY_API_KEY'));
 ```
 
 Depois:

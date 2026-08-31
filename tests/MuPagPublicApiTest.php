@@ -23,9 +23,12 @@ final class MuPagPublicApiTest extends TestCase
         self::assertSame('https://github.com/mupaybr/mupag-sdk-php', $manifest['support']['source']);
         self::assertArrayHasKey('MuPag\\Sdk\\', $manifest['autoload']['psr-4']);
         self::assertArrayNotHasKey('Mupay\\Sdk\\', $manifest['autoload']['psr-4']);
+        self::assertContains('/.gitignore', $manifest['archive']['exclude']);
+        self::assertContains('/composer.lock', $manifest['archive']['exclude']);
+        self::assertContains('/phpunit.xml.dist', $manifest['archive']['exclude']);
     }
 
-    public function testReadmeDocumentsRemovalBeforeInstallingTheMuPagPackage(): void
+    public function testReadmeDocumentsTheTruthfulMigrationBeforeInstallingTheMuPagPackage(): void
     {
         $readme = (string) file_get_contents(__DIR__ . '/../README.md');
         $removePosition = strpos($readme, 'composer remove mupaybr/mupay-sdk');
@@ -34,7 +37,23 @@ final class MuPagPublicApiTest extends TestCase
         self::assertIsInt($removePosition);
         self::assertIsInt($requirePosition);
         self::assertLessThan($requirePosition, $removePosition);
-        self::assertStringContainsString('use Mupay\\Sdk\\MuPagClient;', $readme);
+        self::assertStringContainsString('pacote, o namespace e a classe cliente principal foram renomeados', $readme);
+        self::assertStringContainsString('use Mupay\\Sdk\\Mupay;', $readme);
+        self::assertStringContainsString('$mupay = Mupay::test(', $readme);
+        self::assertStringNotContainsString('use Mupay\\Sdk\\MuPagClient;', $readme);
         self::assertStringContainsString('use MuPag\\Sdk\\MuPagClient;', $readme);
+    }
+
+    public function testShippedExamplesUseCanonicalWebhookAndListItemFields(): void
+    {
+        $webhookExample = (string) file_get_contents(__DIR__ . '/../examples/verify_webhook.php');
+        $listExample = (string) file_get_contents(__DIR__ . '/../examples/list_charges.php');
+        $readme = (string) file_get_contents(__DIR__ . '/../README.md');
+
+        self::assertStringContainsString("\$_SERVER['HTTP_MUPAG_SIGNATURE']", $webhookExample);
+        self::assertStringNotContainsString('HTTP_X_MUPAG_SIGNATURE', $webhookExample);
+        self::assertStringContainsString("\$charge['charge_id']", $listExample);
+        self::assertStringContainsString("\$charge['charge_id']", $readme);
+        self::assertStringContainsString('payload contendo `mode` e `reason`', $readme);
     }
 }

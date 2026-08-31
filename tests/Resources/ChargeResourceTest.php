@@ -39,17 +39,17 @@ final class ChargeResourceTest extends TestCase
     public function testAllReturnsIteratorAcrossPages(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[{"id":"ch_1"}],"next_cursor":"page_2"}'),
-            new Response(200, [], '{"data":[{"id":"ch_2"}]}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_1"}],"next_cursor":"page_2"}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_2"}]}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
-        $ids = array_map(
-            static fn (array $charge): string => $charge['id'],
+        $chargeIds = array_map(
+            static fn (array $charge): string => $charge['charge_id'],
             iterator_to_array($resource->all(['limit' => 1]), false)
         );
 
-        self::assertSame(['ch_1', 'ch_2'], $ids);
+        self::assertSame(['ch_1', 'ch_2'], $chargeIds);
         self::assertSame('limit=1', $http->requests()[0]->getUri()->getQuery());
         self::assertSame('limit=1&cursor=page_2', $http->requests()[1]->getUri()->getQuery());
     }

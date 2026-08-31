@@ -24,9 +24,12 @@
   "archive": {
     "exclude": [
       "/.env",
+      "/.gitignore",
       "/.phpunit.cache/",
       "/AGENTS.md",
       "/build/",
+      "/composer.lock",
+      "/phpunit.xml.dist",
       "/tests/",
       "/vendor/"
     ]
