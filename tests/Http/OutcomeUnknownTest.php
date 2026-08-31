@@ -173,6 +173,35 @@ final class OutcomeUnknownTest extends TestCase
         }
     }
 
+    /** @dataProvider bufferedUnclassifiableConflictBodyProvider */
+    public function testBufferedUnclassifiableConflictIsUnknown(string $body, string $idempotencyKey): void
+    {
+        $http = new FakeHttpClient([new Response(409, [], $body)]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none());
+
+        try {
+            $client->post(
+                '/v1/charges',
+                ['amount_cents' => 100],
+                ['Idempotency-Key' => $idempotencyKey]
+            );
+            self::fail('Expected outcome unknown error.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame($idempotencyKey, $exception->idempotencyKey());
+            self::assertSame(409, $exception->statusCode());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function bufferedUnclassifiableConflictBodyProvider(): array
+    {
+        return [
+            'empty-body' => ['', 'empty-conflict-key'],
+            'malformed-json' => ['{invalid', 'malformed-conflict-key'],
+        ];
+    }
+
     public function testUnreadableRateLimitBodyRetriesWithTheSameKey(): void
     {
         $body = new PumpStream(static function (int $length): string|false {

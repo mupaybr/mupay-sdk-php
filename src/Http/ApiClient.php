@@ -348,7 +348,8 @@ final class ApiClient
         return in_array($status, [408, 425], true)
             || $status >= 500
             || ($status === 409
-                && in_array($responseCode, ['idempotency_in_progress', 'idempotency_outcome_unknown'], true));
+                && ($responseCode === null
+                    || in_array($responseCode, ['idempotency_in_progress', 'idempotency_outcome_unknown'], true)));
     }
 
     private function responseExceptionSnapshot(ResponseInterface $response): ApiException
