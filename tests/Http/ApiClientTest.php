@@ -246,6 +246,21 @@ final class ApiClientTest extends TestCase
         self::assertSame(30, RetryPolicy::retryAfterSeconds($response));
     }
 
+    #[DataProvider('validHttpDateProvider')]
+    public function testRetryPolicyAcceptsAllHttpDateFormats(string $value): void
+    {
+        $response = new Response(429, ['Retry-After' => $value]);
+
+        self::assertSame(0, RetryPolicy::retryAfterSeconds($response));
+    }
+
+    public static function validHttpDateProvider(): iterable
+    {
+        yield 'IMF-fixdate' => ['Sun, 06 Nov 1994 08:49:37 GMT'];
+        yield 'obsolete RFC 850' => ['Sunday, 06-Nov-94 08:49:37 GMT'];
+        yield 'obsolete ANSI C asctime' => ['Sun Nov  6 08:49:37 1994'];
+    }
+
     public function testRetryPolicyRejectsUnboundedConfiguration(): void
     {
         $this->expectException(\InvalidArgumentException::class);
