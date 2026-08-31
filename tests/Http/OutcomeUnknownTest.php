@@ -374,6 +374,9 @@ final class OutcomeUnknownTest extends TestCase
             'invalid-economics' => [
                 new Response(201, [], '{"charge_id":"ch_1","status":"pending","amount_cents":-1}'),
             ],
+            'missing-economics' => [
+                new Response(201, [], '{"charge_id":"ch_1","status":"pending"}'),
+            ],
         ];
     }
 

@@ -16,7 +16,7 @@ final class ChargeResourceTest extends TestCase
     public function testCreateDelegatesToChargesEndpoint(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":{"id":"ch_123","status":"pending"}}'),
+            new Response(200, [], '{"data":{"charge_id":"ch_123","status":"pending","amount_cents":9900}}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
@@ -31,9 +31,31 @@ final class ChargeResourceTest extends TestCase
             ],
         ], 'idem_charge');
 
-        self::assertSame('ch_123', $charge['id']);
+        self::assertSame('ch_123', $charge['charge_id']);
         self::assertSame('/v1/charges', $http->lastRequest()->getUri()->getPath());
         self::assertSame('idem_charge', $http->lastRequest()->getHeaderLine('Idempotency-Key'));
+    }
+
+    public function testCreateNormalizesLegacyResponseIdToChargeId(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"id":"ch_legacy","status":"pending","amount_cents":9900}}'),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        $charge = $resource->create([
+            'amount_cents' => 9900,
+            'payment_method' => 'pix',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+        ], 'idem_legacy_charge');
+
+        self::assertSame('ch_legacy', $charge['charge_id']);
+        self::assertSame('ch_legacy', $charge['id']);
     }
 
     public function testAllReturnsIteratorAcrossPages(): void
@@ -216,10 +238,43 @@ final class ChargeResourceTest extends TestCase
         }
     }
 
+    /** @dataProvider pixCardOnlyFieldProvider */
+    public function testCreatePixRejectsCardOnlyFieldsByKeyPresence(string $field, mixed $value): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+        $payload = [
+            'amount_cents' => 9900,
+            'payment_method' => 'pix',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+            $field => $value,
+        ];
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_pix_card_field');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function pixCardOnlyFieldProvider(): iterable
+    {
+        yield 'empty card token' => ['card_token', ''];
+        yield 'wrong card token id type' => ['card_token_id', []];
+        yield 'null installments' => ['installments', null];
+        yield 'null save card' => ['save_card', null];
+    }
+
     public function testCreateCardForwardsLiteralPayerIp(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":{"id":"ch_123","status":"pending"}}'),
+            new Response(200, [], '{"data":{"id":"ch_123","status":"pending","amount_cents":9900}}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 

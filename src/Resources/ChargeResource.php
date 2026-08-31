@@ -106,10 +106,11 @@ final class ChargeResource
         if (!is_string($data['status'] ?? null) || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {
             throw new \UnexpectedValueException('Resposta 2xx sem status de charge valido.');
         }
-        if ($amount !== null && (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS)) {
+        if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor financeiro valido.');
         }
 
+        $data['charge_id'] = $id;
         return $data;
     }
 
@@ -184,7 +185,10 @@ final class ChargeResource
             throw new \InvalidArgumentException('credit_card exige payer_ip literal do pagador.');
         }
         if ($paymentMethod === 'pix'
-            && ($hasCardToken || $hasCardTokenId || isset($params['installments']) || isset($params['save_card']))) {
+            && (array_key_exists('card_token', $params)
+                || array_key_exists('card_token_id', $params)
+                || array_key_exists('installments', $params)
+                || array_key_exists('save_card', $params))) {
             throw new \InvalidArgumentException('PIX não aceita campos de cartão.');
         }
     }
