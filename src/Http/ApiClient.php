@@ -260,7 +260,7 @@ final class ApiClient
         $headers = array_merge($headers, [
             'Accept' => 'application/json',
             'Authorization' => 'Bearer ' . $this->apiKey,
-            'User-Agent' => 'mupag-sdk/0.1.0',
+            'User-Agent' => 'mupag-sdk/0.2.0',
         ]);
 
         if ($hasBody) {

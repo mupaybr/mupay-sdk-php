@@ -27,6 +27,7 @@ final class ApiClientTest extends TestCase
         self::assertSame(['id' => 'ch_123'], $result['data']);
         $request = $http->lastRequest();
         self::assertSame('Bearer sk_test_123', $request->getHeaderLine('Authorization'));
+        self::assertSame('mupag-sdk/0.2.0', $request->getHeaderLine('User-Agent'));
         self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
         self::assertSame('idem_123', $request->getHeaderLine('Idempotency-Key'));
         self::assertSame('{"amount":9900}', (string) $request->getBody());
