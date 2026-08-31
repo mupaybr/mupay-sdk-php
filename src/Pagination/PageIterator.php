@@ -44,6 +44,9 @@ final class PageIterator implements \IteratorAggregate
             }
             $response = $this->client->get($this->path, $params);
             $cursor = $response['next_cursor'] ?? $response['meta']['next_cursor'] ?? null;
+            if ($cursor !== null && !is_string($cursor)) {
+                throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
+            }
             if (is_string($cursor) && $cursor !== '') {
                 if (preg_match('/\A[\x21-\x7E]{1,256}\z/D', $cursor) !== 1) {
                     throw new \RuntimeException('API retornou cursor invalido durante paginacao.');

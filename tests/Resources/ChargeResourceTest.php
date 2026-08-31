@@ -99,6 +99,61 @@ final class ChargeResourceTest extends TestCase
         self::assertCount(1, $http->requests());
     }
 
+    /** @dataProvider malformedPaginationCursorProvider */
+    public function testAllRejectsMalformedCursorBeforeYieldingItsPage(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        $observedChargeIds = [];
+        try {
+            foreach ($resource->all() as $charge) {
+                $observedChargeIds[] = $charge['charge_id'];
+            }
+            self::fail('Malformed pagination cursor was accepted.');
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('cursor invalido', $exception->getMessage());
+        }
+
+        self::assertSame([], $observedChargeIds);
+        self::assertCount(1, $http->requests());
+    }
+
+    public static function malformedPaginationCursorProvider(): iterable
+    {
+        yield 'root number' => ['{"data":[{"charge_id":"ch_number"}],"next_cursor":123}'];
+        yield 'root array' => ['{"data":[{"charge_id":"ch_array"}],"next_cursor":["page_2"]}'];
+        yield 'root object' => ['{"data":[{"charge_id":"ch_object"}],"next_cursor":{"value":"page_2"}}'];
+        yield 'meta boolean' => ['{"data":[{"charge_id":"ch_boolean"}],"meta":{"next_cursor":false}}'];
+    }
+
+    /** @dataProvider terminalPaginationCursorProvider */
+    public function testAllTreatsNullAndEmptyCursorAsEndOfPagination(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        $chargeIds = array_map(
+            static fn (array $charge): string => $charge['charge_id'],
+            iterator_to_array($resource->all(), false)
+        );
+
+        self::assertSame(['ch_terminal'], $chargeIds);
+        self::assertCount(1, $http->requests());
+    }
+
+    public static function terminalPaginationCursorProvider(): iterable
+    {
+        yield 'root null' => ['{"data":[{"charge_id":"ch_terminal"}],"next_cursor":null}'];
+        yield 'root empty string' => ['{"data":[{"charge_id":"ch_terminal"}],"next_cursor":""}'];
+        yield 'meta null' => ['{"data":[{"charge_id":"ch_terminal"}],"meta":{"next_cursor":null}}'];
+        yield 'meta empty string' => ['{"data":[{"charge_id":"ch_terminal"}],"meta":{"next_cursor":""}}'];
+    }
+
     public function testCreateRejectsPanCvvAndUnknownFieldsBeforeNetwork(): void
     {
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', new FakeHttpClient([]), RetryPolicy::none()));
