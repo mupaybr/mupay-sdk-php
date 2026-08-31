@@ -50,21 +50,53 @@ final class ChargeResourceTest extends TestCase
         );
 
         self::assertSame(['ch_1', 'ch_2'], $chargeIds);
+        self::assertCount(2, $http->requests());
         self::assertSame('limit=1', $http->requests()[0]->getUri()->getQuery());
         self::assertSame('limit=1&cursor=page_2', $http->requests()[1]->getUri()->getQuery());
     }
 
-    public function testAllStopsWhenApiRepeatsCursor(): void
+    public function testAllRejectsRepeatedCursorBeforeYieldingDuplicatedPage(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[],"meta":{"next_cursor":"same"}}'),
-            new Response(200, [], '{"data":[],"meta":{"next_cursor":"same"}}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_1"}],"meta":{"next_cursor":"same"}}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate"}],"meta":{"next_cursor":"same"}}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('cursor repetido');
-        iterator_to_array($resource->all(), false);
+        $observedChargeIds = [];
+        try {
+            foreach ($resource->all() as $charge) {
+                $observedChargeIds[] = $charge['charge_id'];
+            }
+            self::fail('Repeated cursor was accepted.');
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('cursor repetido', $exception->getMessage());
+        }
+
+        self::assertSame(['ch_1'], $observedChargeIds);
+        self::assertCount(2, $http->requests());
+    }
+
+    public function testAllRejectsInitialCursorBeforeYieldingDuplicatedPage(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate"}],"next_cursor":"page_1"}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate_again"}],"next_cursor":"page_1"}'),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        $observedChargeIds = [];
+        try {
+            foreach ($resource->all(['cursor' => 'page_1']) as $charge) {
+                $observedChargeIds[] = $charge['charge_id'];
+            }
+            self::fail('Initial cursor was accepted when returned by the API.');
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('cursor repetido', $exception->getMessage());
+        }
+
+        self::assertSame([], $observedChargeIds);
+        self::assertCount(1, $http->requests());
     }
 
     public function testCreateRejectsPanCvvAndUnknownFieldsBeforeNetwork(): void
