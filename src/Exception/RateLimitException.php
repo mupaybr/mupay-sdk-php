@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Exception;
+namespace MuPag\Sdk\Exception;
 
 final class RateLimitException extends ApiException
 {

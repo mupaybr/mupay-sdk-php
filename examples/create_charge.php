@@ -4,18 +4,18 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
-use Mupay\Sdk\Mupay;
+use MuPag\Sdk\MuPagClient;
 
-$mupay = Mupay::test((string) getenv('MUPAY_API_KEY'));
+$mupag = MuPagClient::test((string) getenv('MUPAG_API_KEY'));
 
-$charge = $mupay->charges->create(
+$charge = $mupag->charges->create(
     [
-        'amount' => 9900,
-        'currency' => 'BRL',
+        'amount_cents' => 9900,
         'payment_method' => 'pix',
         'customer' => [
             'name' => 'Ana Silva',
             'email' => 'ana@example.test',
+            'tax_id' => '12345678901',
         ],
     ],
     'example_order_123'

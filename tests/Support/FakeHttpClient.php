@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Tests\Support;
+namespace MuPag\Sdk\Tests\Support;
 
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;

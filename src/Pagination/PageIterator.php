@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Pagination;
+namespace MuPag\Sdk\Pagination;
 
-use Mupay\Sdk\Http\ApiClient;
+use MuPag\Sdk\Http\ApiClient;
 
 final class PageIterator implements \IteratorAggregate
 {
@@ -26,8 +26,14 @@ final class PageIterator implements \IteratorAggregate
     public function getIterator(): \Traversable
     {
         $params = $this->params;
+        $seenCursors = [];
+        $pages = 0;
 
         do {
+            $pages++;
+            if ($pages > 1_000) {
+                throw new \RuntimeException('Paginacao excedeu o limite seguro de 1000 paginas.');
+            }
             $response = $this->client->get($this->path, $params);
             $items = $response['data'] ?? [];
 
@@ -39,8 +45,15 @@ final class PageIterator implements \IteratorAggregate
                 }
             }
 
-            $cursor = $response['meta']['next_cursor'] ?? null;
+            $cursor = $response['next_cursor'] ?? $response['meta']['next_cursor'] ?? null;
             if (is_string($cursor) && $cursor !== '') {
+                if (preg_match('/\A[\x21-\x7E]{1,256}\z/D', $cursor) !== 1) {
+                    throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
+                }
+                if (isset($seenCursors[$cursor])) {
+                    throw new \RuntimeException('API retornou cursor repetido durante paginacao.');
+                }
+                $seenCursors[$cursor] = true;
                 $params['cursor'] = $cursor;
                 continue;
             }

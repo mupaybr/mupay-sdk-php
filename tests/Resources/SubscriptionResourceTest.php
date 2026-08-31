@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Tests\Resources;
+namespace MuPag\Sdk\Tests\Resources;
 
-use Mupay\Sdk\Http\ApiClient;
-use Mupay\Sdk\Http\RetryPolicy;
-use Mupay\Sdk\Resources\SubscriptionResource;
-use Mupay\Sdk\Tests\Support\FakeHttpClient;
+use MuPag\Sdk\Http\ApiClient;
+use MuPag\Sdk\Http\RetryPolicy;
+use MuPag\Sdk\Resources\SubscriptionResource;
+use MuPag\Sdk\Tests\Support\FakeHttpClient;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 
@@ -20,11 +20,29 @@ final class SubscriptionResourceTest extends TestCase
         ]);
         $resource = new SubscriptionResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
-        $subscription = $resource->cancel('sub_123', 'idem_cancel');
+        $subscription = $resource->cancel('sub_123', 'immediate', 'pedido do cliente', 'idem_cancel');
 
         self::assertSame('canceled', $subscription['status']);
         self::assertSame('/v1/subscriptions/sub_123/cancel', $http->lastRequest()->getUri()->getPath());
         self::assertSame('idem_cancel', $http->lastRequest()->getHeaderLine('Idempotency-Key'));
-        self::assertSame('', (string) $http->lastRequest()->getBody());
+        self::assertSame(
+            '{"mode":"immediate","reason":"pedido do cliente"}',
+            (string) $http->lastRequest()->getBody()
+        );
+    }
+
+    public function testCancelRejectsUnsafeIdentifiersAndModesBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new SubscriptionResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        foreach ([['', 'immediate'], ['sub_123', 'later']] as [$id, $mode]) {
+            try {
+                $resource->cancel($id, $mode, idempotencyKey: 'idem_cancel');
+                self::fail('Expected invalid cancel input.');
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        self::assertCount(0, $http->requests());
     }
 }

@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Tests\Http;
+namespace MuPag\Sdk\Tests\Http;
 
-use Mupay\Sdk\Exception\ApiException;
-use Mupay\Sdk\Exception\RateLimitException;
-use Mupay\Sdk\Http\ApiClient;
-use Mupay\Sdk\Http\RetryPolicy;
-use Mupay\Sdk\Tests\Support\FakeHttpClient;
-use Mupay\Sdk\Tests\Support\NetworkFailure;
+use MuPag\Sdk\Exception\ApiException;
+use MuPag\Sdk\Exception\RateLimitException;
+use MuPag\Sdk\Http\ApiClient;
+use MuPag\Sdk\Http\RetryPolicy;
+use MuPag\Sdk\Tests\Support\FakeHttpClient;
+use MuPag\Sdk\Tests\Support\NetworkFailure;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 
@@ -41,7 +41,7 @@ final class ApiClientTest extends TestCase
                 'status' => 402,
                 'code' => 'card_declined',
                 'suggestion' => 'Tente outro metodo.',
-                'documentation_url' => 'https://docs.mupay.com/errors/card_declined',
+            'documentation_url' => 'https://docs.mupag.com.br/errors/card_declined',
                 'request_id' => 'req_declined',
             ], JSON_THROW_ON_ERROR)),
         ]);
@@ -55,7 +55,7 @@ final class ApiClientTest extends TestCase
             self::assertSame('card_declined', $exception->apiCode());
             self::assertSame('req_declined', $exception->requestId());
             self::assertSame('Tente outro metodo.', $exception->suggestion());
-            self::assertSame('https://docs.mupay.com/errors/card_declined', $exception->documentationUrl());
+        self::assertSame('https://docs.mupag.com.br/errors/card_declined', $exception->documentationUrl());
         }
     }
 
@@ -96,7 +96,9 @@ final class ApiClientTest extends TestCase
 
         self::assertSame('ch_retry', $result['data']['id']);
         self::assertCount(2, $http->requests());
-        self::assertSame([10], $delays);
+        self::assertCount(1, $delays);
+        self::assertGreaterThanOrEqual(7, $delays[0]);
+        self::assertLessThanOrEqual(13, $delays[0]);
     }
 
     public function testRetriesServerErrorsBeforeReturningSuccess(): void
@@ -118,7 +120,9 @@ final class ApiClientTest extends TestCase
         $result = $client->get('/v1/charges/ch_server_retry');
 
         self::assertSame('ch_server_retry', $result['data']['id']);
-        self::assertSame([25], $delays);
+        self::assertCount(1, $delays);
+        self::assertGreaterThanOrEqual(18, $delays[0]);
+        self::assertLessThanOrEqual(32, $delays[0]);
     }
 
     public function testDeleteGeneratesIdempotencyKeyAndAcceptsEmptyBody(): void
@@ -132,5 +136,111 @@ final class ApiClientTest extends TestCase
 
         self::assertSame([], $result);
         self::assertNotSame('', $http->lastRequest()->getHeaderLine('Idempotency-Key'));
+    }
+
+    public function testInvalidIdempotencyKeyIsRejectedBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none());
+
+        foreach (['', ' ', str_repeat('a', 129), "line\nbreak", 'non-ascii-ç'] as $key) {
+            try {
+                $client->post('/v1/charges', [], ['Idempotency-Key' => $key]);
+                self::fail('Expected invalid idempotency key.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('Idempotency-Key', $exception->getMessage());
+            }
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
+    public function testRequestAndResponseBodiesAreBounded(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, ['Content-Length' => '1000'], str_repeat('x', 1000)),
+        ]);
+        $client = new ApiClient(
+            'sk_test_123',
+            'https://api.test.local',
+            $http,
+            RetryPolicy::none(),
+            maxResponseBytes: 64
+        );
+
+        try {
+            $client->post('/v1/charges', ['metadata' => ['large' => str_repeat('x', 1024 * 1024)]]);
+            self::fail('Expected oversized request.');
+        } catch (ApiException $exception) {
+            self::assertStringContainsString('requisicao', $exception->getMessage());
+        }
+        self::assertCount(0, $http->requests());
+
+        $this->expectException(ApiException::class);
+        $this->expectExceptionMessage('resposta');
+        $client->get('/v1/charges');
+    }
+
+    public function testGeneratedIdempotencyKeyIsStableAcrossNetworkRetry(): void
+    {
+        $http = new FakeHttpClient([
+            new NetworkFailure('Temporary timeout'),
+            new Response(200, [], '{"data":{"id":"ch_retry"}}'),
+        ]);
+        $client = new ApiClient(
+            'sk_test_123',
+            'https://api.test.local',
+            $http,
+            new RetryPolicy(1, 0, static function (int $delayMs): void {
+            })
+        );
+
+        $client->post('/v1/charges', ['amount_cents' => 100]);
+
+        self::assertCount(2, $http->requests());
+        self::assertNotSame('', $http->requests()[0]->getHeaderLine('Idempotency-Key'));
+        self::assertSame(
+            $http->requests()[0]->getHeaderLine('Idempotency-Key'),
+            $http->requests()[1]->getHeaderLine('Idempotency-Key')
+        );
+    }
+
+    public function testMalformedRetryAfterNeverCrashesParser(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(429, ['Retry-After' => 'not-a-date'], '{"code":"rate_limited"}'),
+        ]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none());
+
+        try {
+            $client->get('/v1/charges');
+            self::fail('Expected rate limit error.');
+        } catch (RateLimitException $exception) {
+            self::assertNull($exception->retryAfterSeconds());
+        }
+    }
+
+    public function testRetryPolicyRejectsUnboundedConfiguration(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new RetryPolicy(6, 60_000);
+    }
+
+    public function testRetryPolicyAppliesInjectableJitterToBackoff(): void
+    {
+        $delays = [];
+        $policy = new RetryPolicy(
+            1,
+            100,
+            static function (int $delayMs) use (&$delays): void {
+                $delays[] = $delayMs;
+            },
+            static fn (int $delayMs): int => $delayMs + 23
+        );
+
+        $policy->sleepBeforeRetry(0);
+
+        self::assertSame([123], $delays);
     }
 }

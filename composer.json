@@ -1,8 +1,36 @@
 {
-  "name": "mupaybr/mupay-sdk",
-  "description": "SDK oficial PHP para integrar a API publica da Mupay.",
+  "name": "mupag/mupag-sdk",
+  "description": "SDK oficial PHP para integrar a API publica da MuPag.",
   "type": "library",
   "license": "MIT",
+  "homepage": "https://docs.mupag.com.br",
+  "keywords": [
+    "mupag",
+    "payments",
+    "pix",
+    "php",
+    "sdk"
+  ],
+  "authors": [
+    {
+      "name": "MuPag",
+      "homepage": "https://mupag.com.br"
+    }
+  ],
+  "support": {
+    "docs": "https://docs.mupag.com.br",
+    "source": "https://github.com/mupaybr/mupag-sdk-php"
+  },
+  "archive": {
+    "exclude": [
+      "/.env",
+      "/.phpunit.cache/",
+      "/AGENTS.md",
+      "/build/",
+      "/tests/",
+      "/vendor/"
+    ]
+  },
   "require": {
     "php": "^8.1",
     "guzzlehttp/guzzle": "^7.9",
@@ -16,12 +44,12 @@
   },
   "autoload": {
     "psr-4": {
-      "Mupay\\Sdk\\": "src/"
+      "MuPag\\Sdk\\": "src/"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "Mupay\\Sdk\\Tests\\": "tests/"
+      "MuPag\\Sdk\\Tests\\": "tests/"
     }
   },
   "scripts": {

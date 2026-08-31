@@ -4,6 +4,6 @@ declare(strict_types=1);
 
 namespace MuPag\Sdk\Exception;
 
-final class WebhookVerificationException extends MuPagException
+class MuPagException extends \RuntimeException
 {
 }
