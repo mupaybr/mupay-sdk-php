@@ -11,6 +11,7 @@ use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Tests\Support\FakeHttpClient;
 use MuPag\Sdk\Tests\Support\NetworkFailure;
 use GuzzleHttp\Psr7\Response;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ApiClientTest extends TestCase
@@ -219,6 +220,30 @@ final class ApiClientTest extends TestCase
         } catch (RateLimitException $exception) {
             self::assertNull($exception->retryAfterSeconds());
         }
+    }
+
+    #[DataProvider('nonHttpDateRetryAfterProvider')]
+    public function testRetryPolicyRejectsRelativeRetryAfterValues(string $value): void
+    {
+        $response = new Response(429, ['Retry-After' => $value]);
+
+        self::assertNull(RetryPolicy::retryAfterSeconds($response));
+    }
+
+    public static function nonHttpDateRetryAfterProvider(): iterable
+    {
+        yield 'tomorrow' => ['tomorrow'];
+        yield 'next weekday' => ['next Thursday'];
+        yield 'relative interval' => ['+1 hour'];
+        yield 'invalid calendar date' => ['Sun, 31 Feb 2026 00:00:00 GMT'];
+    }
+
+    public function testRetryPolicyAcceptsHttpDateAndCapsDelay(): void
+    {
+        $futureHttpDate = gmdate('D, d M Y H:i:s \G\M\T', time() + 3600);
+        $response = new Response(429, ['Retry-After' => $futureHttpDate]);
+
+        self::assertSame(30, RetryPolicy::retryAfterSeconds($response));
     }
 
     public function testRetryPolicyRejectsUnboundedConfiguration(): void

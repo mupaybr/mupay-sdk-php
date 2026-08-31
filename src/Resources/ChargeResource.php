@@ -111,6 +111,7 @@ final class ChargeResource
         }
 
         $data['charge_id'] = $id;
+        $data['amount_cents'] = $amount;
         return $data;
     }
 

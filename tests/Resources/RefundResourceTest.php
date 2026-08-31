@@ -10,6 +10,7 @@ use MuPag\Sdk\Http\ApiClient;
 use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Resources\RefundResource;
 use MuPag\Sdk\Tests\Support\FakeHttpClient;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class RefundResourceTest extends TestCase
@@ -67,6 +68,32 @@ final class RefundResourceTest extends TestCase
 
         self::assertSame('rf_legacy', $refund['refund_id']);
         self::assertSame('rf_legacy', $refund['id']);
+    }
+
+    #[DataProvider('legacyAmountResponseProvider')]
+    public function testCreateNormalizesLegacyAmountToAmountCents(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], $responseBody),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $refund = $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_legacy_amount');
+
+        self::assertSame(500, $refund['amount_cents']);
+        self::assertSame(500, $refund['amount']);
+    }
+
+    public static function legacyAmountResponseProvider(): iterable
+    {
+        yield 'canonical amount absent' => [
+            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount":500,"status":"completed"}}',
+        ];
+        yield 'canonical amount null' => [
+            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount_cents":null,"amount":500,"status":"completed"}}',
+        ];
     }
 
     /** @dataProvider documentedRefundStatusProvider */

@@ -129,6 +129,7 @@ final class RefundResource
         }
 
         $data['refund_id'] = $id;
+        $data['amount_cents'] = $amount;
         return $data;
     }
 

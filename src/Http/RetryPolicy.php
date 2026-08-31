@@ -8,6 +8,8 @@ use Psr\Http\Message\ResponseInterface;
 
 final class RetryPolicy
 {
+    private const HTTP_DATE_FORMAT = 'D, d M Y H:i:s \G\M\T';
+
     /** @var callable(int): void */
     private $sleeper;
 
@@ -104,11 +106,19 @@ final class RetryPolicy
         if (ctype_digit($value)) {
             return min(30, (int) $value);
         }
-        $retryAt = strtotime($value);
-        if ($retryAt === false) {
+        $retryAt = \DateTimeImmutable::createFromFormat(
+            '!' . self::HTTP_DATE_FORMAT,
+            $value,
+            new \DateTimeZone('GMT')
+        );
+        $errors = \DateTimeImmutable::getLastErrors();
+        if ($retryAt === false
+            || (is_array($errors)
+                && ($errors['warning_count'] !== 0 || $errors['error_count'] !== 0))
+            || $retryAt->format(self::HTTP_DATE_FORMAT) !== $value) {
             return null;
         }
 
-        return min(30, max(0, $retryAt - time()));
+        return min(30, max(0, $retryAt->getTimestamp() - time()));
     }
 }

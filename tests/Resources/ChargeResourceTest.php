@@ -9,6 +9,7 @@ use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Resources\ChargeResource;
 use MuPag\Sdk\Tests\Support\FakeHttpClient;
 use GuzzleHttp\Psr7\Response;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ChargeResourceTest extends TestCase
@@ -56,6 +57,39 @@ final class ChargeResourceTest extends TestCase
 
         self::assertSame('ch_legacy', $charge['charge_id']);
         self::assertSame('ch_legacy', $charge['id']);
+    }
+
+    #[DataProvider('legacyAmountResponseProvider')]
+    public function testCreateNormalizesLegacyAmountToAmountCents(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        $charge = $resource->create([
+            'amount_cents' => 9900,
+            'payment_method' => 'pix',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+        ], 'idem_legacy_amount');
+
+        self::assertSame(9900, $charge['amount_cents']);
+        self::assertSame(9900, $charge['amount']);
+    }
+
+    public static function legacyAmountResponseProvider(): iterable
+    {
+        yield 'canonical amount absent' => [
+            '{"data":{"charge_id":"ch_legacy","status":"pending","amount":9900}}',
+        ];
+        yield 'canonical amount null' => [
+            '{"data":{"charge_id":"ch_legacy","status":"pending","amount_cents":null,"amount":9900}}',
+        ];
     }
 
     public function testAllReturnsIteratorAcrossPages(): void

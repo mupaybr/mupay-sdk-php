@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MuPag\Sdk\Tests\Resources;
 
+use MuPag\Sdk\Exception\OutcomeUnknownException;
 use MuPag\Sdk\Http\ApiClient;
 use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Resources\SubscriptionResource;
@@ -29,6 +30,23 @@ final class SubscriptionResourceTest extends TestCase
             '{"mode":"immediate","reason":"pedido do cliente"}',
             (string) $http->lastRequest()->getBody()
         );
+    }
+
+    public function testCancelTreatsMismatchedResponseIdAsOutcomeUnknown(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"id":"sub_other","status":"canceled"}}'),
+        ]);
+        $resource = new SubscriptionResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        try {
+            $resource->cancel('sub_requested', 'immediate', idempotencyKey: 'idem_cancel_mismatch');
+            self::fail('Mismatched subscription ID confirmed a cancellation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_cancel_mismatch', $exception->idempotencyKey());
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
     }
 
     public function testCancelRejectsUnsafeIdentifiersAndModesBeforeNetwork(): void
