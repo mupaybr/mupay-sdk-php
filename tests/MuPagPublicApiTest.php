@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace MuPag\Sdk\Tests;
 
+use GuzzleHttp\Psr7\Response;
+use MuPag\Sdk\Http\ApiClient;
+use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\MuPagClient;
+use MuPag\Sdk\Resources\ChargeResource;
+use MuPag\Sdk\Tests\Support\FakeHttpClient;
 use PHPUnit\Framework\TestCase;
 
 final class MuPagPublicApiTest extends TestCase
@@ -55,5 +60,46 @@ final class MuPagPublicApiTest extends TestCase
         self::assertStringContainsString("\$charge['charge_id']", $listExample);
         self::assertStringContainsString("\$charge['charge_id']", $readme);
         self::assertStringContainsString('payload contendo `mode` e `reason`', $readme);
+    }
+
+    public function testReadmeErrorExampleSendsACompletePixChargeWithAStableIdempotencyKey(): void
+    {
+        $readme = (string) file_get_contents(__DIR__ . '/../README.md');
+        $matched = preg_match(
+            '/## Tratar erros sem adivinhar\s+```php\s+(.*?)```/s',
+            $readme,
+            $matches
+        );
+
+        self::assertSame(1, $matched, 'Bloco PHP de tratamento de erros ausente do README.');
+
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"charge_id":"ch_readme","status":"pending","amount_cents":9900}}'),
+        ]);
+        $charges = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $mupag = new class ($charges) {
+            public function __construct(public readonly ChargeResource $charges)
+            {
+            }
+        };
+        $executableExample = preg_replace('/^use [^;]+;\R/m', '', $matches[1]);
+        self::assertIsString($executableExample);
+
+        eval($executableExample);
+
+        $request = $http->lastRequest();
+        $payload = json_decode((string) $request->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame([
+            'amount_cents' => 9900,
+            'payment_method' => 'pix',
+            'customer' => [
+                'name' => 'Cliente Exemplo',
+                'email' => 'cliente@example.test',
+                'tax_id' => '00000000000',
+            ],
+        ], $payload);
+        self::assertSame('order_123_error_handling', $request->getHeaderLine('Idempotency-Key'));
     }
 }

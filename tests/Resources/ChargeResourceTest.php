@@ -256,4 +256,77 @@ final class ChargeResourceTest extends TestCase
             }
         }
     }
+
+    /** @dataProvider fractionalTimestampWindowProvider */
+    public function testAllPreservesFractionalRfc3339WindowsInTheQuery(string $from, string $to): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":[]}'),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        iterator_to_array($resource->all([
+            'created_at_from' => $from,
+            'created_at_to' => $to,
+        ]));
+
+        parse_str($http->lastRequest()->getUri()->getQuery(), $query);
+        self::assertSame($from, $query['created_at_from']);
+        self::assertSame($to, $query['created_at_to']);
+    }
+
+    public static function fractionalTimestampWindowProvider(): iterable
+    {
+        yield 'same UTC second' => [
+            '2026-08-31T12:00:00.100Z',
+            '2026-08-31T12:00:00.900Z',
+        ];
+        yield 'same instant second across offsets' => [
+            '2026-08-31T12:00:00.500-03:00',
+            '2026-08-31T15:00:00.600Z',
+        ];
+    }
+
+    /** @dataProvider nonIncreasingTimestampWindowProvider */
+    public function testAllRejectsEqualOrReversedRfc3339Windows(string $from, string $to): void
+    {
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', new FakeHttpClient([]), RetryPolicy::none()));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $resource->all([
+            'created_at_from' => $from,
+            'created_at_to' => $to,
+        ]);
+    }
+
+    public static function nonIncreasingTimestampWindowProvider(): iterable
+    {
+        yield 'equal literal' => [
+            '2026-08-31T12:00:00.100Z',
+            '2026-08-31T12:00:00.100Z',
+        ];
+        yield 'equal instant across offsets' => [
+            '2026-08-31T12:00:00.100-03:00',
+            '2026-08-31T15:00:00.100Z',
+        ];
+        yield 'reversed fractional window' => [
+            '2026-08-31T12:00:00.900Z',
+            '2026-08-31T12:00:00.100Z',
+        ];
+    }
+
+    /** @dataProvider invalidTimestampProvider */
+    public function testAllRejectsInvalidRfc3339Timestamps(string $value): void
+    {
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', new FakeHttpClient([]), RetryPolicy::none()));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $resource->all(['created_at_from' => $value]);
+    }
+
+    public static function invalidTimestampProvider(): iterable
+    {
+        yield 'missing timezone' => ['2026-08-31T12:00:00.100'];
+        yield 'not a date' => ['not-a-dateZ'];
+    }
 }

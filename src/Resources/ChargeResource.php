@@ -249,7 +249,7 @@ final class ChargeResource
         }
     }
 
-    private function timestamp(mixed $value, string $field): ?int
+    private function timestamp(mixed $value, string $field): ?\DateTimeImmutable
     {
         if ($value === null) {
             return null;
@@ -259,8 +259,9 @@ final class ChargeResource
             || preg_match('/(?:Z|[+-][0-9]{2}:[0-9]{2})\z/D', $value) !== 1) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
-        $timestamp = strtotime($value);
-        if ($timestamp === false) {
+        try {
+            $timestamp = new \DateTimeImmutable($value);
+        } catch (\Exception) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
         return $timestamp;

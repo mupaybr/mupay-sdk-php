@@ -143,7 +143,18 @@ use MuPag\Sdk\Exception\OutcomeUnknownException;
 use MuPag\Sdk\Exception\RateLimitException;
 
 try {
-    $mupag->charges->create(['amount_cents' => 9900]);
+    $mupag->charges->create(
+        [
+            'amount_cents' => 9900,
+            'payment_method' => 'pix',
+            'customer' => [
+                'name' => 'Cliente Exemplo',
+                'email' => 'cliente@example.test',
+                'tax_id' => '00000000000',
+            ],
+        ],
+        idempotencyKey: 'order_123_error_handling',
+    );
 } catch (OutcomeUnknownException $exception) {
     persist_for_reconciliation($exception->idempotencyKey());
 } catch (RateLimitException $exception) {
