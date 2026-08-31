@@ -173,20 +173,27 @@ final class ChargeResource
             && (!is_string($payerIp) || filter_var($payerIp, FILTER_VALIDATE_IP) === false)) {
             throw new \InvalidArgumentException('payer_ip deve ser um IP literal IPv4 ou IPv6.');
         }
-        $hasCardToken = is_string($params['card_token'] ?? null) && $params['card_token'] !== '';
-        $hasCardTokenId = is_string($params['card_token_id'] ?? null) && $params['card_token_id'] !== '';
-        if ($hasCardToken && $hasCardTokenId) {
-            throw new \InvalidArgumentException('card_token e card_token_id são mutuamente exclusivos.');
-        }
-        if ($paymentMethod === 'credit_card' && !$hasCardToken && !$hasCardTokenId) {
-            throw new \InvalidArgumentException('credit_card exige token do PSP.');
+        $hasCardToken = array_key_exists('card_token', $params);
+        $hasCardTokenId = array_key_exists('card_token_id', $params);
+        if ($paymentMethod === 'credit_card') {
+            if ($hasCardToken
+                && (!is_string($params['card_token']) || $params['card_token'] === '')) {
+                throw new \InvalidArgumentException('card_token invalido.');
+            }
+            if ($hasCardTokenId
+                && (!is_string($params['card_token_id']) || $params['card_token_id'] === '')) {
+                throw new \InvalidArgumentException('card_token_id invalido.');
+            }
+            if ($hasCardToken === $hasCardTokenId) {
+                throw new \InvalidArgumentException('credit_card exige exatamente um token do PSP.');
+            }
         }
         if ($paymentMethod === 'credit_card' && $payerIp === null) {
             throw new \InvalidArgumentException('credit_card exige payer_ip literal do pagador.');
         }
         if ($paymentMethod === 'pix'
-            && (array_key_exists('card_token', $params)
-                || array_key_exists('card_token_id', $params)
+            && ($hasCardToken
+                || $hasCardTokenId
                 || array_key_exists('installments', $params)
                 || array_key_exists('save_card', $params))) {
             throw new \InvalidArgumentException('PIX não aceita campos de cartão.');
@@ -248,27 +255,66 @@ final class ChargeResource
         }
         $from = $this->timestamp($params['created_at_from'] ?? null, 'created_at_from');
         $to = $this->timestamp($params['created_at_to'] ?? null, 'created_at_to');
-        if ($from !== null && $to !== null && $from >= $to) {
+        if ($from !== null && $to !== null && $this->compareTimestamps($from, $to) >= 0) {
             throw new \InvalidArgumentException('created_at_from deve ser anterior a created_at_to.');
         }
     }
 
-    private function timestamp(mixed $value, string $field): ?\DateTimeImmutable
+    /** @return array{seconds: int, fraction: string}|null */
+    private function timestamp(mixed $value, string $field): ?array
     {
         if ($value === null) {
             return null;
         }
-        if (!is_string($value)
-            || strlen($value) > 64
-            || preg_match('/(?:Z|[+-][0-9]{2}:[0-9]{2})\z/D', $value) !== 1) {
+        if (!is_string($value) || strlen($value) > 64) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
-        try {
-            $timestamp = new \DateTimeImmutable($value);
-        } catch (\Exception) {
+        $matched = preg_match(
+            '/\A(?<date>[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01]))'
+                . '[Tt](?<time>(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9])'
+                . '(?:\.(?<fraction>[0-9]+))?'
+                . '(?<zone>[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])\z/D',
+            $value,
+            $parts,
+            PREG_UNMATCHED_AS_NULL
+        );
+        if ($matched !== 1) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
-        return $timestamp;
+        $zone = strtolower($parts['zone']) === 'z' ? '+00:00' : $parts['zone'];
+        $timestamp = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d\TH:i:sP',
+            $parts['date'] . 'T' . $parts['time'] . $zone
+        );
+        $errors = \DateTimeImmutable::getLastErrors();
+        if ($timestamp === false
+            || (is_array($errors)
+                && ($errors['warning_count'] !== 0 || $errors['error_count'] !== 0))) {
+            throw new \InvalidArgumentException($field . ' invalido.');
+        }
+
+        return [
+            'seconds' => $timestamp->getTimestamp(),
+            'fraction' => $parts['fraction'] ?? '0',
+        ];
+    }
+
+    /**
+     * @param array{seconds: int, fraction: string} $left
+     * @param array{seconds: int, fraction: string} $right
+     */
+    private function compareTimestamps(array $left, array $right): int
+    {
+        $secondsComparison = $left['seconds'] <=> $right['seconds'];
+        if ($secondsComparison !== 0) {
+            return $secondsComparison;
+        }
+
+        $precision = max(strlen($left['fraction']), strlen($right['fraction']));
+        return strcmp(
+            str_pad($left['fraction'], $precision, '0', STR_PAD_RIGHT),
+            str_pad($right['fraction'], $precision, '0', STR_PAD_RIGHT)
+        );
     }
 
     private function rejectSensitiveFields(mixed $value): void

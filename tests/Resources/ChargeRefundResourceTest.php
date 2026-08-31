@@ -16,13 +16,14 @@ final class ChargeRefundResourceTest extends TestCase
     public function testCreatesRefundForChargeWithIdempotencyKey(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":{"id":"rf_123","amount":12990}}'),
+            new Response(200, [], '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":12990,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.sandbox.mupag.com.br', $http, RetryPolicy::none()));
 
         $refund = $resource->refund('ch_123', ['amount_cents' => 12990], 'idem_refund_123');
 
-        self::assertSame(['id' => 'rf_123', 'amount' => 12990], $refund);
+        self::assertSame('rf_123', $refund['refund_id']);
+        self::assertSame(12990, $refund['amount_cents']);
         self::assertSame('/v1/charges/ch_123/refunds', $http->lastRequest()->getUri()->getPath());
         self::assertSame('idem_refund_123', $http->lastRequest()->getHeaderLine('Idempotency-Key'));
     }
@@ -30,7 +31,7 @@ final class ChargeRefundResourceTest extends TestCase
     public function testRefundRequiresExplicitIdempotencyKey(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":{"id":"rf_123","amount":12990}}'),
+            new Response(200, [], '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":12990,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.sandbox.mupag.com.br', $http, RetryPolicy::none()));
 

@@ -9,6 +9,14 @@ use MuPag\Sdk\Http\ApiClient;
 final class RefundResource
 {
     private const MAX_MONEY_CENTS = 9_000_000_000_000_000;
+    private const ALLOWED_STATUSES = [
+        'requested',
+        'processing',
+        'completed',
+        'failed',
+        'cancelled',
+        'unknown',
+    ];
 
     public function __construct(private readonly ApiClient $client)
     {
@@ -112,13 +120,15 @@ final class RefundResource
         if (!is_string($id) || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1) {
             throw new \UnexpectedValueException('Resposta 2xx sem refund_id valido.');
         }
-        if ($amount !== null && (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS)) {
+        if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor de refund valido.');
         }
-        if (isset($data['status']) && (!is_string($data['status']) || $data['status'] === '')) {
+        if (!is_string($data['status'] ?? null)
+            || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {
             throw new \UnexpectedValueException('Resposta 2xx sem status de refund valido.');
         }
 
+        $data['refund_id'] = $id;
         return $data;
     }
 

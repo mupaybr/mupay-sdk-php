@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MuPag\Sdk\Tests\Resources;
 
 use GuzzleHttp\Psr7\Response;
+use MuPag\Sdk\Exception\OutcomeUnknownException;
 use MuPag\Sdk\Http\ApiClient;
+use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Resources\RefundResource;
 use MuPag\Sdk\Tests\Support\FakeHttpClient;
 use PHPUnit\Framework\TestCase;
@@ -31,6 +33,68 @@ final class RefundResourceTest extends TestCase
         self::assertSame('rf_123', $refund['refund_id']);
         self::assertSame('/v1/charges/ch_123/refunds', $http->lastRequest()->getUri()->getPath());
         self::assertSame('idem_refund_1', $http->lastRequest()->getHeaderLine('Idempotency-Key'));
+    }
+
+    /** @dataProvider incompleteEconomicRefundResponseProvider */
+    public function testCreateRejectsIncompleteEconomicSuccessResponse(string $body): void
+    {
+        $http = new FakeHttpClient([new Response(201, [], $body)]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(OutcomeUnknownException::class);
+        $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_economics');
+    }
+
+    public static function incompleteEconomicRefundResponseProvider(): iterable
+    {
+        yield 'missing amount' => ['{"refund_id":"rf_123","status":"completed"}'];
+        yield 'missing status' => ['{"refund_id":"rf_123","amount_cents":500}'];
+        yield 'unknown status' => ['{"refund_id":"rf_123","amount_cents":500,"status":"mystery"}'];
+    }
+
+    public function testCreateNormalizesLegacyResponseIdToRefundId(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"data":{"id":"rf_legacy","charge_id":"ch_123","amount":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $refund = $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_legacy');
+
+        self::assertSame('rf_legacy', $refund['refund_id']);
+        self::assertSame('rf_legacy', $refund['id']);
+    }
+
+    /** @dataProvider documentedRefundStatusProvider */
+    public function testCreateAcceptsDocumentedRefundStatuses(string $status): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], json_encode([
+                'refund_id' => 'rf_123',
+                'charge_id' => 'ch_123',
+                'amount_cents' => 1,
+                'status' => $status,
+                'requested_at' => '2026-08-31T12:00:00Z',
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $refund = $resource->create('ch_123', ['amount_cents' => 1], 'idem_refund_status');
+
+        self::assertSame($status, $refund['status']);
+    }
+
+    public static function documentedRefundStatusProvider(): iterable
+    {
+        foreach (['requested', 'processing', 'completed', 'failed', 'cancelled', 'unknown'] as $status) {
+            yield $status => [$status];
+        }
     }
 
     public function testCreateRejectsBlankChargeIdBeforeNetwork(): void
@@ -59,7 +123,7 @@ final class RefundResourceTest extends TestCase
     public function testCreateSendsExplicitFullIntent(): void
     {
         $http = new FakeHttpClient([
-            new Response(202, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"pending"}'),
+            new Response(202, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested"}'),
         ]);
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
 

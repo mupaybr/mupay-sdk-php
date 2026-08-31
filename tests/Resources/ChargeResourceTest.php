@@ -271,6 +271,79 @@ final class ChargeResourceTest extends TestCase
         yield 'null save card' => ['save_card', null];
     }
 
+    /** @dataProvider malformedSecondaryCardTokenProvider */
+    public function testCreateCardRejectsEachPresentMalformedTokenBeforeNetwork(array $tokenFields): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+        $payload = [
+            'amount_cents' => 9900,
+            'payment_method' => 'credit_card',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+            'payer_ip' => '203.0.113.10',
+        ] + $tokenFields;
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_card_tokens');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function malformedSecondaryCardTokenProvider(): iterable
+    {
+        yield 'valid card token does not hide null token id' => [[
+            'card_token' => 'token_value',
+            'card_token_id' => null,
+        ]];
+        yield 'valid token id does not hide malformed card token' => [[
+            'card_token' => [],
+            'card_token_id' => 'token_123',
+        ]];
+        yield 'both valid token fields remain exclusive' => [[
+            'card_token' => 'token_value',
+            'card_token_id' => 'token_123',
+        ]];
+    }
+
+    /** @dataProvider validCardTokenProvider */
+    public function testCreateCardAcceptsExactlyOneValidTokenField(string $field, string $value): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"charge_id":"ch_123","status":"pending","amount_cents":9900}}'),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        $resource->create([
+            'amount_cents' => 9900,
+            'payment_method' => 'credit_card',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+            'payer_ip' => '203.0.113.10',
+            $field => $value,
+        ], 'idem_single_card_token');
+
+        $payload = json_decode((string) $http->lastRequest()->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($value, $payload[$field]);
+        self::assertCount(1, $http->requests());
+    }
+
+    public static function validCardTokenProvider(): iterable
+    {
+        yield 'ephemeral token' => ['card_token', 'token_value'];
+        yield 'saved token id' => ['card_token_id', 'token_123'];
+    }
+
     public function testCreateCardForwardsLiteralPayerIp(): void
     {
         $http = new FakeHttpClient([
@@ -312,8 +385,8 @@ final class ChargeResourceTest extends TestCase
         }
     }
 
-    /** @dataProvider fractionalTimestampWindowProvider */
-    public function testAllPreservesFractionalRfc3339WindowsInTheQuery(string $from, string $to): void
+    /** @dataProvider rfc3339TimestampWindowProvider */
+    public function testAllPreservesRfc3339WindowsInTheQuery(string $from, string $to): void
     {
         $http = new FakeHttpClient([
             new Response(200, [], '{"data":[]}'),
@@ -330,8 +403,12 @@ final class ChargeResourceTest extends TestCase
         self::assertSame($to, $query['created_at_to']);
     }
 
-    public static function fractionalTimestampWindowProvider(): iterable
+    public static function rfc3339TimestampWindowProvider(): iterable
     {
+        yield 'whole seconds' => [
+            '2024-02-29T23:59:58Z',
+            '2024-02-29T23:59:59Z',
+        ];
         yield 'same UTC second' => [
             '2026-08-31T12:00:00.100Z',
             '2026-08-31T12:00:00.900Z',
@@ -339,6 +416,14 @@ final class ChargeResourceTest extends TestCase
         yield 'same instant second across offsets' => [
             '2026-08-31T12:00:00.500-03:00',
             '2026-08-31T15:00:00.600Z',
+        ];
+        yield 'arbitrary fractional precision' => [
+            '2026-08-31T12:00:00.123456789Z',
+            '2026-08-31T12:00:00.123456790Z',
+        ];
+        yield 'lowercase RFC 3339 separators' => [
+            '2026-08-31t12:00:00.100z',
+            '2026-08-31t12:00:00.200z',
         ];
     }
 
@@ -383,5 +468,11 @@ final class ChargeResourceTest extends TestCase
     {
         yield 'missing timezone' => ['2026-08-31T12:00:00.100'];
         yield 'not a date' => ['not-a-dateZ'];
+        yield 'relative date' => ['tomorrowZ'];
+        yield 'date without time' => ['2026-08-31Z'];
+        yield 'space separator' => ['2026-08-31 12:00:00Z'];
+        yield 'time without seconds' => ['2026-08-31T12:00Z'];
+        yield 'invalid calendar date' => ['2026-02-30T12:00:00Z'];
+        yield 'invalid offset' => ['2026-08-31T12:00:00+24:00'];
     }
 }
