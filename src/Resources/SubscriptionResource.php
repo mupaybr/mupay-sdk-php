@@ -38,7 +38,8 @@ final class SubscriptionResource
     {
         if ($id === '.'
             || $id === '..'
-            || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1) {
+            || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1
+            || $this->containsPanLikeSequence($id)) {
             throw new \InvalidArgumentException('Subscription ID invalido.');
         }
         if (!in_array($mode, ['immediate', 'end_of_period'], true)) {
@@ -118,7 +119,7 @@ final class SubscriptionResource
             }
             $character = $match[0];
             $offset += strlen($character);
-            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf})\z/uD', $character) === 1) {
+            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf}|\p{Cc})\z/uD', $character) === 1) {
                 continue;
             }
             $digits = '';

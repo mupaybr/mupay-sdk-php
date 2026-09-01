@@ -251,8 +251,6 @@ final class ChargeResource
         $hasLegacy = array_key_exists($legacy, $data);
         if ($hasPrimary
             && $hasLegacy
-            && $data[$primary] !== null
-            && $data[$legacy] !== null
             && $data[$primary] !== $data[$legacy]) {
             throw new \UnexpectedValueException('Resposta contem aliases conflitantes.');
         }
@@ -312,7 +310,7 @@ final class ChargeResource
                 throw new \InvalidArgumentException($field . ' nao pode conter PAN.');
             }
         }
-        foreach (['name', 'email'] as $field) {
+        foreach (['id', 'name', 'email'] as $field) {
             if (is_string($params['customer'][$field] ?? null)
                 && $this->containsPanLikeSequence($params['customer'][$field])) {
                 throw new \InvalidArgumentException('customer.' . $field . ' nao pode conter PAN.');
@@ -738,7 +736,7 @@ final class ChargeResource
             }
             $character = $match[0];
             $offset += strlen($character);
-            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf})\z/uD', $character) === 1) {
+            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf}|\p{Cc})\z/uD', $character) === 1) {
                 continue;
             }
             $reset();

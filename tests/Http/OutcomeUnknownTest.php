@@ -456,7 +456,7 @@ final class OutcomeUnknownTest extends TestCase
             'amount_cents' => 100,
             'payment_method' => 'pix',
             'customer' => [
-                'id' => '22222222-2222-4222-8222-222222222222',
+                'id' => 'a2222222-b222-4a22-8c22-d22222222222',
                 'name' => 'Ana Silva',
                 'email' => 'ana@example.com',
                 'tax_id' => '12345678901',

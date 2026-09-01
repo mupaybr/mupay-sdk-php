@@ -90,9 +90,6 @@ final class ChargeResourceTest extends TestCase
         yield 'canonical amount absent' => [
             '{"data":{"charge_id":"ch_legacy","status":"pending","amount":9900}}',
         ];
-        yield 'canonical amount null' => [
-            '{"data":{"charge_id":"ch_legacy","status":"pending","amount_cents":null,"amount":9900}}',
-        ];
     }
 
     #[DataProvider('mismatchedAmountResponseProvider')]
@@ -694,6 +691,8 @@ final class ChargeResourceTest extends TestCase
 		yield 'symbol separators' => [['note' => '4111+1111=1111|1111']];
 		yield 'Unicode format separators' => [['note' => "4111\u{200B}1111\u{200B}1111\u{200B}1111"]];
 		yield 'Unicode combining marks' => [['note' => "4111\u{0301}1111\u{0301}1111\u{0301}1111"]];
+		yield 'NUL separators' => [['note' => "4111\0 1111\0 1111\0 1111"]];
+		yield 'Unicode control separators' => [['note' => "4111\u{0080}1111\u{0080}1111\u{0080}1111"]];
 		yield 'camel-case security code key' => [['securityCode' => '123']];
 		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
 		yield 'CVV2 key' => [['cvv2' => '123']];
@@ -1121,6 +1120,8 @@ final class ChargeResourceTest extends TestCase
         foreach ([
             ['id' => 'ch_other'],
             ['amount' => 9901],
+            ['charge_id' => null, 'id' => 'ch_alias'],
+            ['amount_cents' => null, 'amount' => 9900],
         ] as $index => $legacyAlias) {
             $response = [
                 'data' => [
@@ -1144,6 +1145,41 @@ final class ChargeResourceTest extends TestCase
                 self::assertSame('idem_alias_' . $index, $exception->idempotencyKey());
             }
         }
+    }
+
+    public function testCreateRejectsPanCustomerIdBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['customer']['id'] = '4111-1111-1111-1111';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('PAN');
+        try {
+            $resource->create($payload, 'idem_pan_customer');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public function testCreateAcceptsNumericNonLuhnCustomerId(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"charge_id":"ch_customer","status":"pending","amount_cents":9900}}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['customer']['id'] = '8777777777771013';
+
+        $charge = $resource->create($payload, 'idem_non_luhn_customer');
+
+        self::assertSame('ch_customer', $charge['charge_id']);
+        self::assertCount(1, $http->requests());
     }
 
     public function testCreateKeepsOutcomeUnknownForDivergentExternalReferenceAfterAmbiguousRetry(): void

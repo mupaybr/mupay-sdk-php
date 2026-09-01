@@ -74,21 +74,6 @@ final class RefundResourceTest extends TestCase
         self::assertSame('rf_legacy', $refund['id']);
     }
 
-    public function testCreateUsesLegacyIdWhenCanonicalIdIsNull(): void
-    {
-        $http = new FakeHttpClient([
-            new Response(201, [], '{"data":{"refund_id":null,"id":"rf_legacy","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
-        ]);
-        $resource = new RefundResource(
-            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
-        );
-
-        $refund = $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_null_id');
-
-        self::assertSame('rf_legacy', $refund['refund_id']);
-        self::assertSame('rf_legacy', $refund['id']);
-    }
-
     #[DataProvider('conflictingRefundAliasResponseProvider')]
     public function testCreateRejectsConflictingCanonicalAndLegacyAliases(
         string $responseBody
@@ -114,6 +99,12 @@ final class RefundResourceTest extends TestCase
         ];
         yield 'amount aliases' => [
             '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"amount":501,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
+        ];
+        yield 'canonical refund ID null' => [
+            '{"data":{"refund_id":null,"id":"rf_legacy","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
+        ];
+        yield 'canonical amount null' => [
+            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":null,"amount":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
         ];
     }
 
@@ -162,9 +153,6 @@ final class RefundResourceTest extends TestCase
     {
         yield 'canonical amount absent' => [
             '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
-        ];
-        yield 'canonical amount null' => [
-            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount_cents":null,"amount":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
         ];
     }
 
@@ -391,6 +379,28 @@ final class RefundResourceTest extends TestCase
         yield 'get refund ID' => ['get refund ID'];
         yield 'list charge ID' => ['list charge ID'];
         yield 'reason' => ['reason'];
+    }
+
+    #[DataProvider('controlSeparatedPanProvider')]
+    public function testRefundReasonRejectsControlSeparatedPanBeforeNetwork(string $pan): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create('ch_123', ['amount_cents' => 500, 'reason' => $pan]);
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function controlSeparatedPanProvider(): iterable
+    {
+        yield 'NUL' => ["4111\0 1111\0 1111\0 1111"];
+        yield 'Unicode Cc' => ["4111\u{0080}1111\u{0080}1111\u{0080}1111"];
     }
 
     public function testRefundInputsAcceptNumericNonLuhnValues(): void

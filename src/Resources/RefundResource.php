@@ -206,18 +206,20 @@ final class RefundResource
         bool $correlateReason = false
     ): array
     {
+        $hasCanonicalId = array_key_exists('refund_id', $data);
+        $hasLegacyId = array_key_exists('id', $data);
         $canonicalId = $data['refund_id'] ?? null;
         $legacyId = $data['id'] ?? null;
-        if ($canonicalId !== null && $legacyId !== null && $canonicalId !== $legacyId) {
+        if ($hasCanonicalId && $hasLegacyId && $canonicalId !== $legacyId) {
             throw new \UnexpectedValueException('Resposta 2xx com aliases de refund_id divergentes.');
         }
         $id = $canonicalId ?? $legacyId;
         $chargeId = $data['charge_id'] ?? null;
+        $hasCanonicalAmount = array_key_exists('amount_cents', $data);
+        $hasLegacyAmount = array_key_exists('amount', $data);
         $canonicalAmount = $data['amount_cents'] ?? null;
         $legacyAmount = $data['amount'] ?? null;
-        if ($canonicalAmount !== null
-            && $legacyAmount !== null
-            && $canonicalAmount !== $legacyAmount) {
+        if ($hasCanonicalAmount && $hasLegacyAmount && $canonicalAmount !== $legacyAmount) {
             throw new \UnexpectedValueException('Resposta 2xx com aliases de amount_cents divergentes.');
         }
         $amount = $canonicalAmount ?? $legacyAmount;
@@ -385,7 +387,7 @@ final class RefundResource
             }
             $character = $match[0];
             $offset += strlen($character);
-            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf})\z/uD', $character) === 1) {
+            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf}|\p{Cc})\z/uD', $character) === 1) {
                 continue;
             }
             $digits = '';

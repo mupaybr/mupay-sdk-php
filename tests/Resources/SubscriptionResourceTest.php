@@ -50,6 +50,28 @@ final class SubscriptionResourceTest extends TestCase
         }
     }
 
+    #[DataProvider('controlSeparatedPanProvider')]
+    public function testCancelRejectsControlSeparatedPanReasonBeforeNetwork(string $pan): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->cancel('sub_123', 'immediate', $pan);
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function controlSeparatedPanProvider(): iterable
+    {
+        yield 'NUL' => ["4111\0 1111\0 1111\0 1111"];
+        yield 'Unicode Cc' => ["4111\u{0080}1111\u{0080}1111\u{0080}1111"];
+    }
+
     public function testCancelAcceptsNumericNonLuhnReason(): void
     {
         $http = new FakeHttpClient([
@@ -65,6 +87,44 @@ final class SubscriptionResourceTest extends TestCase
             '{"mode":"immediate","reason":"8777777777771013"}',
             (string) $http->lastRequest()->getBody()
         );
+    }
+
+    public function testCancelRejectsPanSubscriptionIdBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Subscription ID');
+        try {
+            $resource->cancel('4111-1111-1111-1111', 'immediate');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public function testCancelAcceptsNumericNonLuhnSubscriptionId(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(
+                200,
+                [],
+                '{"data":{"id":"8777777777771013","status":"canceled","cancel_at_period_end":false}}'
+            ),
+        ]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $resource->cancel('8777777777771013', 'immediate');
+
+        self::assertSame(
+            '/v1/subscriptions/8777777777771013/cancel',
+            $http->lastRequest()->getUri()->getPath()
+        );
+        self::assertCount(1, $http->requests());
     }
 
     public function testCancelTreatsMismatchedResponseIdAsOutcomeUnknown(): void
