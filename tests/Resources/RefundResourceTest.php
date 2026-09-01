@@ -24,6 +24,7 @@ final class RefundResourceTest extends TestCase
                     'charge_id' => 'ch_123',
                     'amount_cents' => 500,
                     'status' => 'completed',
+                    'requested_at' => '2026-08-31T12:00:00Z',
                 ],
             ], JSON_THROW_ON_ERROR)),
         ]);
@@ -92,10 +93,10 @@ final class RefundResourceTest extends TestCase
     public static function legacyAmountResponseProvider(): iterable
     {
         yield 'canonical amount absent' => [
-            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount":500,"status":"completed"}}',
+            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
         ];
         yield 'canonical amount null' => [
-            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount_cents":null,"amount":500,"status":"completed"}}',
+            '{"data":{"refund_id":"rf_legacy","charge_id":"ch_123","amount_cents":null,"amount":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
         ];
     }
 
@@ -122,17 +123,17 @@ final class RefundResourceTest extends TestCase
     public static function mismatchedPartialRefundAmountProvider(): iterable
     {
         yield 'canonical amount' => [
-            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":501,"status":"completed"}}',
+            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":501,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
         ];
         yield 'legacy amount' => [
-            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount":501,"status":"completed"}}',
+            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount":501,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
         ];
     }
 
     public function testCreateTreatsMismatchedChargeIdAsOutcomeUnknown(): void
     {
         $http = new FakeHttpClient([
-            new Response(201, [], '{"data":{"refund_id":"rf_123","charge_id":"ch_other","amount_cents":500,"status":"completed"}}'),
+            new Response(201, [], '{"data":{"refund_id":"rf_123","charge_id":"ch_other","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
         ]);
         $resource = new RefundResource(
             new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
@@ -231,7 +232,7 @@ final class RefundResourceTest extends TestCase
     public function testCreateSendsExplicitFullIntent(): void
     {
         $http = new FakeHttpClient([
-            new Response(202, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested"}'),
+            new Response(202, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested","reason":"customer_request","requested_at":"2026-08-31T12:00:00Z"}'),
         ]);
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
 
@@ -246,7 +247,7 @@ final class RefundResourceTest extends TestCase
     public function testCreateFullRefundDoesNotInventAmountCorrelation(): void
     {
         $http = new FakeHttpClient([
-            new Response(202, [], '{"refund_id":"rf_full","charge_id":"ch_123","amount_cents":750,"status":"requested"}'),
+            new Response(202, [], '{"refund_id":"rf_full","charge_id":"ch_123","amount_cents":750,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}'),
         ]);
         $resource = new RefundResource(
             new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
@@ -258,27 +259,52 @@ final class RefundResourceTest extends TestCase
         self::assertCount(1, $http->requests());
     }
 
+    public function testFullRefundWithoutModeEchoDoesNotConfirmAfterAmbiguousRetry(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(503, [], '{"code":"temporarily_unavailable"}'),
+            new Response(202, [], '{"refund_id":"rf_full","charge_id":"ch_123","amount_cents":750,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}'),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient(
+                'sk_test_123',
+                'https://api.test',
+                $http,
+                new RetryPolicy(1, 0, static function (int $delayMs): void {
+                })
+            )
+        );
+
+        try {
+            $resource->create('ch_123', ['full' => true], 'idem_refund_full_ambiguous');
+            self::fail('Uncorrelated full refund confirmed an ambiguous mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_refund_full_ambiguous', $exception->idempotencyKey());
+            self::assertCount(2, $http->requests());
+        }
+    }
+
     public function testGetAndListByChargeUseReconciliationEndpoints(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed"}'),
-            new Response(200, [], '{"refunds":[{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed"}],"next_cursor":"cursor_2"}'),
+            new Response(200, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}'),
+            new Response(200, [], '{"refunds":[{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"Zm8"}'),
         ]);
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
 
         $refund = $resource->get('rf_123');
-        $page = $resource->listByCharge('ch_123', 25, 'cursor_1');
+        $page = $resource->listByCharge('ch_123', 25, 'Zg');
 
         self::assertSame('completed', $refund['status']);
-        self::assertSame('cursor_2', $page['next_cursor']);
+        self::assertSame('Zm8', $page['next_cursor']);
         self::assertSame('/v1/refunds/rf_123', $http->requests()[0]->getUri()->getPath());
-        self::assertSame('limit=25&cursor=cursor_1', $http->requests()[1]->getUri()->getQuery());
+        self::assertSame('limit=25&cursor=Zg', $http->requests()[1]->getUri()->getQuery());
     }
 
     public function testGetNormalizesLegacyFieldsAndCorrelatesRequestedRefundId(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":{"id":"rf_123","charge_id":"ch_123","amount":750,"status":"completed"}}'),
+            new Response(200, [], '{"data":{"id":"rf_123","charge_id":"ch_123","amount":750,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
         ]);
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
 
@@ -309,6 +335,7 @@ final class RefundResourceTest extends TestCase
             'charge_id' => 'ch_123',
             'amount_cents' => 500,
             'status' => 'completed',
+            'requested_at' => '2026-08-31T12:00:00Z',
         ];
 
         yield 'different refund ID' => [[...$valid, 'refund_id' => 'rf_other']];
@@ -321,7 +348,7 @@ final class RefundResourceTest extends TestCase
     public function testListByChargeNormalizesEveryRefundWithoutInventingAmountCorrelation(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"refunds":[{"id":"rf_legacy","charge_id":"ch_123","amount":750,"status":"completed"}]}'),
+            new Response(200, [], '{"refunds":[{"id":"rf_legacy","charge_id":"ch_123","amount":750,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}]}'),
         ]);
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
 
@@ -333,7 +360,7 @@ final class RefundResourceTest extends TestCase
     }
 
     #[DataProvider('terminalRefundCursorProvider')]
-    public function testListByChargeTreatsMissingNullAndEmptyCursorAsTerminal(array $pagination): void
+    public function testListByChargeTreatsMissingAndNullCursorAsTerminal(array $pagination): void
     {
         $http = new FakeHttpClient([
             new Response(200, [], json_encode([
@@ -342,6 +369,7 @@ final class RefundResourceTest extends TestCase
                     'charge_id' => 'ch_123',
                     'amount_cents' => 500,
                     'status' => 'completed',
+                    'requested_at' => '2026-08-31T12:00:00Z',
                 ]],
                 ...$pagination,
             ], JSON_THROW_ON_ERROR)),
@@ -359,7 +387,6 @@ final class RefundResourceTest extends TestCase
     {
         yield 'missing' => [[]];
         yield 'null' => [['next_cursor' => null]];
-        yield 'empty string' => [['next_cursor' => '']];
     }
 
     #[DataProvider('invalidRefundCursorProvider')]
@@ -384,6 +411,144 @@ final class RefundResourceTest extends TestCase
         yield 'array' => [[]];
         yield 'object-shaped map' => [['value' => 'cursor_2']];
         yield 'space' => ['bad cursor'];
+        yield 'non-canonical trailing bits' => ['Zh'];
+        yield 'padded base64url' => ['Zg=='];
+        yield 'empty string' => [''];
+    }
+
+    #[DataProvider('refundPageLimitProvider')]
+    public function testListByChargeEnforcesRequestedAndDefaultPageLimits(
+        ?int $limit,
+        int $itemCount,
+        bool $wantError
+    ): void {
+        $refund = [
+            'refund_id' => 'rf_123',
+            'charge_id' => 'ch_123',
+            'amount_cents' => 500,
+            'status' => 'completed',
+            'requested_at' => '2026-08-31T12:00:00Z',
+        ];
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode([
+                'refunds' => array_fill(0, $itemCount, $refund),
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        if ($wantError) {
+            $this->expectException(\UnexpectedValueException::class);
+        }
+
+        $page = $resource->listByCharge('ch_123', $limit);
+        if (!$wantError) {
+            self::assertCount($itemCount, $page['refunds']);
+        }
+    }
+
+    public static function refundPageLimitProvider(): iterable
+    {
+        yield 'requested overflow' => [1, 2, true];
+        yield 'requested exact' => [2, 2, false];
+        yield 'default overflow' => [null, 101, true];
+        yield 'default maximum' => [null, 100, false];
+    }
+
+    #[DataProvider('refundCreateTimestampProvider')]
+    public function testCreateRequiresValidRequestedAt(string $body): void
+    {
+        $http = new FakeHttpClient([new Response(202, [], $body)]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(OutcomeUnknownException::class);
+        $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_requested_at');
+    }
+
+    public static function refundCreateTimestampProvider(): iterable
+    {
+        yield 'missing' => [
+            '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested"}',
+        ];
+        yield 'null' => [
+            '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested","requested_at":null}',
+        ];
+        yield 'impossible date' => [
+            '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested","requested_at":"2026-02-30T12:00:00Z"}',
+        ];
+    }
+
+    #[DataProvider('refundReadTimestampProvider')]
+    public function testReadsRequireValidRequestedAt(string $operation, string $body): void
+    {
+        $http = new FakeHttpClient([new Response(200, [], $body)]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $this->expectException(\UnexpectedValueException::class);
+        if ($operation === 'get') {
+            $resource->get('rf_123');
+            return;
+        }
+        $resource->listByCharge('ch_123');
+    }
+
+    public static function refundReadTimestampProvider(): iterable
+    {
+        $missing = '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed"}';
+        $invalid = '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-02-30T12:00:00Z"}';
+        yield 'get missing' => ['get', $missing];
+        yield 'get invalid' => ['get', $invalid];
+        yield 'list missing' => ['list', '{"refunds":[' . $missing . ']}'];
+        yield 'list invalid' => ['list', '{"refunds":[' . $invalid . ']}'];
+    }
+
+    #[DataProvider('refundReasonCorrelationProvider')]
+    public function testCreateCorrelatesRequestedReason(
+        bool $includeReason,
+        ?string $responseReason,
+        bool $wantUnknown
+    ): void {
+        $refund = [
+            'refund_id' => 'rf_123',
+            'charge_id' => 'ch_123',
+            'amount_cents' => 500,
+            'status' => 'requested',
+            'requested_at' => '2026-08-31T12:00:00Z',
+        ];
+        if ($includeReason) {
+            $refund['reason'] = $responseReason;
+        }
+        $http = new FakeHttpClient([
+            new Response(202, [], json_encode($refund, JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        try {
+            $response = $resource->create(
+                'ch_123',
+                ['amount_cents' => 500, 'reason' => 'customer_request'],
+                'idem_refund_reason'
+            );
+            if ($wantUnknown) {
+                self::fail('Uncorrelated refund reason confirmed the mutation.');
+            }
+            self::assertSame('customer_request', $response['reason']);
+        } catch (OutcomeUnknownException $exception) {
+            if (!$wantUnknown) {
+                throw $exception;
+            }
+            self::assertSame('idem_refund_reason', $exception->idempotencyKey());
+        }
+    }
+
+    public static function refundReasonCorrelationProvider(): iterable
+    {
+        yield 'identical' => [true, 'customer_request', false];
+        yield 'missing' => [false, null, true];
+        yield 'divergent' => [true, 'duplicate', true];
     }
 
     #[DataProvider('invalidRefundListShapeProvider')]
@@ -405,6 +570,7 @@ final class RefundResourceTest extends TestCase
             'charge_id' => 'ch_123',
             'amount_cents' => 500,
             'status' => 'completed',
+            'requested_at' => '2026-08-31T12:00:00Z',
         ];
 
         yield 'associative map' => [['refunds' => ['first' => $valid]]];
@@ -449,6 +615,8 @@ final class RefundResourceTest extends TestCase
                 static fn (): array => $resource->get('../refund'),
                 static fn (): array => $resource->listByCharge('ch_123', 101),
                 static fn (): array => $resource->listByCharge('ch_123', 25, 'bad cursor'),
+                static fn (): array => $resource->listByCharge('ch_123', 25, 'Zh'),
+                static fn (): array => $resource->listByCharge('ch_123', 25, 'Zg=='),
             ] as $operation
         ) {
             try {

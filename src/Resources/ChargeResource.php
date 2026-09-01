@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MuPag\Sdk\Resources;
 
 use MuPag\Sdk\Http\ApiClient;
+use MuPag\Sdk\Pagination\CursorValidator;
 use MuPag\Sdk\Pagination\PageIterator;
 
 final class ChargeResource
@@ -209,6 +210,7 @@ final class ChargeResource
             throw new \InvalidArgumentException('Charge contém campos desconhecidos.');
         }
         $this->rejectSensitiveFields($params);
+        $this->rejectPanValues($params['metadata'] ?? null);
         if (!is_int($params['amount_cents'] ?? null)
             || $params['amount_cents'] < 100
             || $params['amount_cents'] > self::MAX_MONEY_CENTS) {
@@ -420,8 +422,7 @@ final class ChargeResource
             throw new \InvalidArgumentException('limit deve estar entre 1 e 100.');
         }
         if (isset($params['cursor'])
-            && (!is_string($params['cursor'])
-                || preg_match('/\A[A-Za-z0-9_-]{1,256}\z/D', $params['cursor']) !== 1)) {
+            && !CursorValidator::isCanonicalBase64Url($params['cursor'])) {
             throw new \InvalidArgumentException('cursor invalido.');
         }
         $from = $this->timestamp($params['created_at_from'] ?? null, 'created_at_from');
@@ -503,5 +504,76 @@ final class ChargeResource
             }
             $this->rejectSensitiveFields($child, $depth + 1);
         }
+    }
+
+    private function rejectPanValues(mixed $value, int $depth = 0): void
+    {
+        if ($depth > self::MAX_INPUT_NESTING_DEPTH) {
+            throw new \InvalidArgumentException('Payload excede o limite de profundidade.');
+        }
+        if (is_array($value)) {
+            foreach ($value as $child) {
+                $this->rejectPanValues($child, $depth + 1);
+            }
+            return;
+        }
+        $panLike = is_string($value)
+            ? $this->containsPanLikeSequence($value)
+            : (is_int($value) && $this->validPanSequence((string) $value));
+        if ($panLike) {
+            throw new \InvalidArgumentException('Metadata contem possivel numero de cartao.');
+        }
+    }
+
+    private function containsPanLikeSequence(string $value): bool
+    {
+        $characters = preg_split('//u', $value, -1, PREG_SPLIT_NO_EMPTY);
+        if ($characters === false) {
+            return false;
+        }
+        $digits = '';
+        $tooLong = false;
+        $flush = function () use (&$digits, &$tooLong): bool {
+            $matched = !$tooLong && $this->validPanSequence($digits);
+            $digits = '';
+            $tooLong = false;
+            return $matched;
+        };
+        foreach ($characters as $character) {
+            if (preg_match('/\A[0-9]\z/D', $character) === 1) {
+                if (strlen($digits) < 20) {
+                    $digits .= $character;
+                } else {
+                    $tooLong = true;
+                }
+            } elseif (preg_match('/\A(?:\s|\p{P})\z/uD', $character) === 1) {
+                continue;
+            } elseif ($flush()) {
+                return true;
+            }
+        }
+        return $flush();
+    }
+
+    private function validPanSequence(string $digits): bool
+    {
+        $length = strlen($digits);
+        if ($length < 12 || $length > 19 || preg_match('/\A[0-9]+\z/D', $digits) !== 1) {
+            return false;
+        }
+        $sum = 0;
+        $doubleDigit = false;
+        for ($index = $length - 1; $index >= 0; $index--) {
+            $digit = ord($digits[$index]) - 48;
+            if ($doubleDigit) {
+                $digit *= 2;
+                if ($digit > 9) {
+                    $digit -= 9;
+                }
+            }
+            $sum += $digit;
+            $doubleDigit = !$doubleDigit;
+        }
+        return $sum % 10 === 0;
     }
 }

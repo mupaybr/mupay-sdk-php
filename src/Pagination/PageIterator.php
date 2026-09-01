@@ -32,8 +32,8 @@ final class PageIterator implements \IteratorAggregate
         $initialCursor = $params['cursor'] ?? null;
         $effectiveLimit = is_int($params['limit'] ?? null) ? $params['limit'] : 25;
 
-        if (is_string($initialCursor) && $initialCursor !== '') {
-            if (preg_match('/\A[A-Za-z0-9_-]{1,256}\z/D', $initialCursor) !== 1) {
+        if ($initialCursor !== null) {
+            if (!CursorValidator::isCanonicalBase64Url($initialCursor)) {
                 throw new \InvalidArgumentException('cursor invalido.');
             }
             $seenCursors[$initialCursor] = true;
@@ -55,11 +55,8 @@ final class PageIterator implements \IteratorAggregate
             } else {
                 $cursor = null;
             }
-            if ($cursor !== null && !is_string($cursor)) {
-                throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
-            }
-            if (is_string($cursor) && $cursor !== '') {
-                if (preg_match('/\A[A-Za-z0-9_-]{1,256}\z/D', $cursor) !== 1) {
+            if ($cursor !== null) {
+                if (!CursorValidator::isCanonicalBase64Url($cursor)) {
                     throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
                 }
                 if (isset($seenCursors[$cursor])) {
@@ -87,7 +84,7 @@ final class PageIterator implements \IteratorAggregate
                 yield $item;
             }
 
-            if (is_string($cursor) && $cursor !== '') {
+            if ($cursor !== null) {
                 $params['cursor'] = $cursor;
                 continue;
             }

@@ -225,7 +225,7 @@ final class ChargeResourceTest extends TestCase
     public function testAllReturnsIteratorAcrossPages(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[{"charge_id":"ch_1","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:00Z"}],"next_cursor":"page_2"}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_1","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:00Z"}],"next_cursor":"Zg"}'),
             new Response(200, [], '{"data":[{"charge_id":"ch_2","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:01Z"}]}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
@@ -238,7 +238,7 @@ final class ChargeResourceTest extends TestCase
         self::assertSame(['ch_1', 'ch_2'], $chargeIds);
         self::assertCount(2, $http->requests());
         self::assertSame('limit=1', $http->requests()[0]->getUri()->getQuery());
-        self::assertSame('limit=1&cursor=page_2', $http->requests()[1]->getUri()->getQuery());
+        self::assertSame('limit=1&cursor=Zg', $http->requests()[1]->getUri()->getQuery());
     }
 
     public function testAllRejectsRepeatedCursorBeforeYieldingDuplicatedPage(): void
@@ -266,14 +266,14 @@ final class ChargeResourceTest extends TestCase
     public function testAllRejectsInitialCursorBeforeYieldingDuplicatedPage(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate"}],"next_cursor":"page_1"}'),
-            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate_again"}],"next_cursor":"page_1"}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate"}],"next_cursor":"Zg"}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate_again"}],"next_cursor":"Zg"}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
         $observedChargeIds = [];
         try {
-            foreach ($resource->all(['cursor' => 'page_1']) as $charge) {
+            foreach ($resource->all(['cursor' => 'Zg']) as $charge) {
                 $observedChargeIds[] = $charge['charge_id'];
             }
             self::fail('Initial cursor was accepted when returned by the API.');
@@ -313,10 +313,15 @@ final class ChargeResourceTest extends TestCase
         yield 'root array' => ['{"data":[{"charge_id":"ch_array"}],"next_cursor":["page_2"]}'];
         yield 'root object' => ['{"data":[{"charge_id":"ch_object"}],"next_cursor":{"value":"page_2"}}'];
         yield 'meta boolean' => ['{"data":[{"charge_id":"ch_boolean"}],"meta":{"next_cursor":false}}'];
+        yield 'non-canonical trailing bits' => ['{"data":[],"next_cursor":"Zh"}'];
+        yield 'padded base64url' => ['{"data":[],"next_cursor":"Zg=="}'];
+        yield 'outside base64url alphabet' => ['{"data":[],"next_cursor":"bad cursor"}'];
+        yield 'root empty string' => ['{"data":[],"next_cursor":""}'];
+        yield 'meta empty string' => ['{"data":[],"meta":{"next_cursor":""}}'];
     }
 
     /** @dataProvider terminalPaginationCursorProvider */
-    public function testAllTreatsNullAndEmptyCursorAsEndOfPagination(string $responseBody): void
+    public function testAllTreatsMissingAndNullCursorAsEndOfPagination(string $responseBody): void
     {
         $http = new FakeHttpClient([
             new Response(200, [], $responseBody),
@@ -335,10 +340,9 @@ final class ChargeResourceTest extends TestCase
     public static function terminalPaginationCursorProvider(): iterable
     {
         $item = '{"charge_id":"ch_terminal","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:00Z"}';
+        yield 'missing' => ['{"data":[' . $item . ']}'];
         yield 'root null' => ['{"data":[' . $item . '],"next_cursor":null}'];
-        yield 'root empty string' => ['{"data":[' . $item . '],"next_cursor":""}'];
         yield 'meta null' => ['{"data":[' . $item . '],"meta":{"next_cursor":null}}'];
-        yield 'meta empty string' => ['{"data":[' . $item . '],"meta":{"next_cursor":""}}'];
     }
 
     /** @dataProvider invalidChargePageProvider */
@@ -522,6 +526,52 @@ final class ChargeResourceTest extends TestCase
         }
 
         self::assertCount(0, $http->requests());
+    }
+
+    /** @param array<string, mixed> $metadata */
+    #[DataProvider('panLikeMetadataProvider')]
+    public function testCreateRejectsPanLikeMetadataValuesBeforeNetwork(array $metadata): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = $metadata;
+
+        try {
+            $resource->create($payload, 'idem_pan_metadata');
+            self::fail('PAN-like metadata value was accepted.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function panLikeMetadataProvider(): iterable
+    {
+        yield 'spaces and hyphens' => [['note' => '4111 1111-1111 1111']];
+        yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
+        yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
+        yield 'nested value' => [['order' => [['note' => 'card 4111-1111-1111-1111']]]];
+    }
+
+    public function testCreateAcceptsEquivalentNonLuhnMetadataValue(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"charge_id":"charge_1","status":"pending","amount_cents":100}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = ['note' => '4111 1111 1111 1112'];
+
+        $charge = $resource->create($payload, 'idem_non_luhn_metadata');
+
+        self::assertSame('charge_1', $charge['charge_id']);
+        self::assertCount(1, $http->requests());
     }
 
     /** @dataProvider dotSegmentCustomerIdProvider */
@@ -876,7 +926,13 @@ final class ChargeResourceTest extends TestCase
     {
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', new FakeHttpClient([]), RetryPolicy::none()));
 
-        foreach ([['limit' => 101], ['cursor' => 'bad cursor'], ['status' => 'DROP TABLE']] as $params) {
+        foreach ([
+            ['limit' => 101],
+            ['cursor' => 'bad cursor'],
+            ['cursor' => 'Zh'],
+            ['cursor' => 'Zg=='],
+            ['status' => 'DROP TABLE'],
+        ] as $params) {
             try {
                 $resource->all($params);
                 self::fail('Unsafe list params were accepted.');

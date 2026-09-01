@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MuPag\Sdk\Resources;
 
 use MuPag\Sdk\Http\ApiClient;
+use MuPag\Sdk\Pagination\CursorValidator;
 
 final class RefundResource
 {
@@ -39,7 +40,16 @@ final class RefundResource
             fn (array $response): array => $this->validatedRefundData(
                 $response,
                 expectedAmount: $params['amount_cents'] ?? null,
-                expectedChargeId: $chargeId
+                expectedChargeId: $chargeId,
+                expectedReason: array_key_exists('reason', $params) ? $params['reason'] : null,
+                correlateReason: array_key_exists('reason', $params)
+            ),
+            fn (array $response): array => $this->validatedRefundDataAfterAmbiguous(
+                $response,
+                expectedAmount: $params['amount_cents'] ?? null,
+                expectedChargeId: $chargeId,
+                expectedReason: array_key_exists('reason', $params) ? $params['reason'] : null,
+                correlateReason: array_key_exists('reason', $params)
             )
         );
     }
@@ -70,7 +80,7 @@ final class RefundResource
         if ($limit !== null && ($limit < 1 || $limit > 100)) {
             throw new \InvalidArgumentException('limit deve estar entre 1 e 100.');
         }
-        if ($cursor !== null && preg_match('/\A[\x21-\x7E]{1,256}\z/D', $cursor) !== 1) {
+        if ($cursor !== null && !CursorValidator::isCanonicalBase64Url($cursor)) {
             throw new \InvalidArgumentException('cursor invalido.');
         }
 
@@ -89,6 +99,9 @@ final class RefundResource
         if (!is_array($refunds) || !array_is_list($refunds)) {
             throw new \UnexpectedValueException('Resposta de listagem de refunds invalida.');
         }
+        if (count($refunds) > ($limit ?? 100)) {
+            throw new \UnexpectedValueException('Resposta de listagem de refunds excede o limit solicitado.');
+        }
         $validatedRefunds = [];
         foreach ($refunds as $refund) {
             if (!is_array($refund)) {
@@ -101,9 +114,7 @@ final class RefundResource
         }
         if (array_key_exists('next_cursor', $response)
             && $response['next_cursor'] !== null
-            && (!is_string($response['next_cursor'])
-                || ($response['next_cursor'] !== ''
-                    && preg_match('/\A[\x21-\x7E]{1,256}\z/D', $response['next_cursor']) !== 1))) {
+            && !CursorValidator::isCanonicalBase64Url($response['next_cursor'])) {
             throw new \UnexpectedValueException('Cursor de refunds invalido na resposta.');
         }
 
@@ -137,14 +148,47 @@ final class RefundResource
         array $response,
         ?int $expectedAmount = null,
         ?string $expectedRefundId = null,
-        ?string $expectedChargeId = null
+        ?string $expectedChargeId = null,
+        ?string $expectedReason = null,
+        bool $correlateReason = false
     ): array {
         return $this->validatedRefund(
             $this->data($response),
             $expectedAmount,
             $expectedRefundId,
-            $expectedChargeId
+            $expectedChargeId,
+            $expectedReason,
+            $correlateReason
         );
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     * @return array<string, mixed>
+     */
+    private function validatedRefundDataAfterAmbiguous(
+        array $response,
+        ?int $expectedAmount = null,
+        ?string $expectedRefundId = null,
+        ?string $expectedChargeId = null,
+        ?string $expectedReason = null,
+        bool $correlateReason = false
+    ): array {
+        $data = $this->validatedRefundData(
+            $response,
+            $expectedAmount,
+            $expectedRefundId,
+            $expectedChargeId,
+            $expectedReason,
+            $correlateReason
+        );
+        if ($expectedAmount === null) {
+            throw new \UnexpectedValueException(
+                'Resposta nao confirma semanticamente o estorno total solicitado.'
+            );
+        }
+
+        return $data;
     }
 
     /**
@@ -155,7 +199,9 @@ final class RefundResource
         array $data,
         ?int $expectedAmount = null,
         ?string $expectedRefundId = null,
-        ?string $expectedChargeId = null
+        ?string $expectedChargeId = null,
+        ?string $expectedReason = null,
+        bool $correlateReason = false
     ): array
     {
         $id = $data['refund_id'] ?? $data['id'] ?? null;
@@ -174,6 +220,9 @@ final class RefundResource
             || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {
             throw new \UnexpectedValueException('Resposta 2xx sem status de refund valido.');
         }
+        if (!$this->validTimestamp($data['requested_at'] ?? null)) {
+            throw new \UnexpectedValueException('Resposta 2xx sem requested_at de refund valido.');
+        }
         if ($expectedAmount !== null && $amount !== $expectedAmount) {
             throw new \UnexpectedValueException('Resposta 2xx com valor de refund divergente.');
         }
@@ -182,6 +231,10 @@ final class RefundResource
         }
         if ($expectedChargeId !== null && $chargeId !== $expectedChargeId) {
             throw new \UnexpectedValueException('Resposta 2xx com charge_id de refund divergente.');
+        }
+        if ($correlateReason
+            && (!array_key_exists('reason', $data) || $data['reason'] !== $expectedReason)) {
+            throw new \UnexpectedValueException('Resposta 2xx com reason de refund divergente.');
         }
 
         $data['refund_id'] = $id;
@@ -207,6 +260,35 @@ final class RefundResource
         return $value !== '.'
             && $value !== '..'
             && preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $value) === 1;
+    }
+
+    private function validTimestamp(mixed $value): bool
+    {
+        if (!is_string($value) || strlen($value) > 64) {
+            return false;
+        }
+        $matched = preg_match(
+            '/\A(?<date>[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01]))'
+                . '[Tt](?<time>(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9])'
+                . '(?:\.(?<fraction>[0-9]+))?'
+                . '(?<zone>[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])\z/D',
+            $value,
+            $parts,
+            PREG_UNMATCHED_AS_NULL
+        );
+        if ($matched !== 1) {
+            return false;
+        }
+        $zone = strtolower($parts['zone']) === 'z' ? '+00:00' : $parts['zone'];
+        $timestamp = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d\TH:i:sP',
+            $parts['date'] . 'T' . $parts['time'] . $zone
+        );
+        $errors = \DateTimeImmutable::getLastErrors();
+
+        return $timestamp !== false
+            && (!is_array($errors)
+                || ($errors['warning_count'] === 0 && $errors['error_count'] === 0));
     }
 
     /**
