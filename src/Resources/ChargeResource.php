@@ -556,7 +556,7 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'verificationcode')
                 || str_ends_with($sensitiveBase, 'verificationvalue')
                 || str_ends_with($sensitiveBase, 'verificationnumber')
-                || str_ends_with($sensitiveBase, 'identificationnumber')
+                || str_ends_with($sensitiveBase, 'cardidentificationnumber')
                 || preg_match('/(?:^|card)(?:csc|cid)(?:value|code|number)?$/', $sensitiveBase) === 1) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }

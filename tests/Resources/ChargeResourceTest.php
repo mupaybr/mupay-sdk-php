@@ -759,7 +759,11 @@ final class ChargeResourceTest extends TestCase
             new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
         );
         $payload = $this->validPixChargePayload(100);
-        $payload['metadata'] = ['note' => '1000 0000 0000 1000'];
+        $payload['metadata'] = [
+            'note' => '1000 0000 0000 1000',
+            'taxIdentificationNumber' => 'BR-123',
+            'orderIdentificationNumber' => 'order-123',
+        ];
 
         $charge = $resource->create($payload, 'idem_non_luhn_metadata');
 
