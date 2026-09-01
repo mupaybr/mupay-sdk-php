@@ -497,6 +497,14 @@ final class ChargeResourceTest extends TestCase
             json_encode(['data' => [[...$valid, 'payment_method' => 'credit_card']]], JSON_THROW_ON_ERROR),
             ['payment_method' => 'pix'],
         ];
+        yield 'customer id outside filter' => [
+            json_encode(['data' => [[...$valid, 'customer_id' => 'customer_b']]], JSON_THROW_ON_ERROR),
+            ['customer_id' => 'customer_a'],
+        ];
+        yield 'nested customer id outside filter' => [
+            json_encode(['data' => [[...$valid, 'customer' => ['id' => 'customer_b']]]], JSON_THROW_ON_ERROR),
+            ['customer_id' => 'customer_a'],
+        ];
         yield 'before lower bound' => [
             json_encode(['data' => [[...$valid, 'created_at' => '2026-08-31T11:59:59Z']]], JSON_THROW_ON_ERROR),
             ['created_at_from' => '2026-08-31T12:00:00Z'],
@@ -677,6 +685,7 @@ final class ChargeResourceTest extends TestCase
         yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
 		yield 'symbol separators' => [['note' => '4111+1111=1111|1111']];
 		yield 'Unicode format separators' => [['note' => "4111\u{200B}1111\u{200B}1111\u{200B}1111"]];
+		yield 'Unicode combining marks' => [['note' => "4111\u{0301}1111\u{0301}1111\u{0301}1111"]];
 		yield 'camel-case security code key' => [['securityCode' => '123']];
 		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
 		yield 'CVV2 key' => [['cvv2' => '123']];
@@ -1032,6 +1041,67 @@ final class ChargeResourceTest extends TestCase
         yield 'external reference' => ['external_reference'];
         yield 'affiliate code' => ['affiliate_code'];
         yield 'coupon code' => ['coupon_code'];
+    }
+
+    public function testCreateRejectsNonStringFreeTextBeforeNetwork(): void
+    {
+        foreach ([
+            4111111111111111,
+            new class implements \JsonSerializable {
+                public function jsonSerialize(): string
+                {
+                    return '4111111111111111';
+                }
+            },
+        ] as $index => $value) {
+            $http = new FakeHttpClient([]);
+            $resource = new ChargeResource(
+                new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+            );
+            $payload = $this->validPixChargePayload(9900);
+            $payload['description'] = $value;
+
+            try {
+                $resource->create($payload, 'idem_non_string_text_' . $index);
+                self::fail('Non-string free text was accepted.');
+            } catch (\InvalidArgumentException) {
+            }
+
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public function testCreateKeepsOutcomeUnknownForDivergentCustomerEchoAfterAmbiguousRetry(): void
+    {
+        foreach ([
+            ['customer_id' => 'customer_other'],
+            ['customer' => ['id' => 'customer_other']],
+            ['customer_id' => null],
+        ] as $index => $customerEcho) {
+            $response = [
+                'data' => [
+                    'charge_id' => 'ch_customer_' . $index,
+                    'status' => 'pending',
+                    'amount_cents' => 9900,
+                    ...$customerEcho,
+                ],
+            ];
+            $http = new FakeHttpClient([
+                new NetworkFailure('Response lost after request dispatch'),
+                new Response(200, [], json_encode($response, JSON_THROW_ON_ERROR)),
+            ]);
+            $resource = new ChargeResource(
+                new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry())
+            );
+
+            try {
+                $resource->create($this->validPixChargePayload(9900), 'idem_customer_' . $index);
+                self::fail('Divergent customer echo confirmed an ambiguous mutation.');
+            } catch (OutcomeUnknownException $exception) {
+                self::assertSame('idem_customer_' . $index, $exception->idempotencyKey());
+                self::assertCount(2, $http->requests());
+            }
+        }
     }
 
     #[DataProvider('nonOneInstallmentValueProvider')]

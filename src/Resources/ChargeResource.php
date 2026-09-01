@@ -47,6 +47,9 @@ final class ChargeResource
         if (is_string($params['coupon_code'] ?? null) && trim($params['coupon_code']) !== '') {
             $couponCode = $params['coupon_code'];
         }
+        $customerId = is_string($params['customer']['id'] ?? null)
+            ? $params['customer']['id']
+            : null;
         return $this->client->post(
             '/v1/charges',
             $params,
@@ -55,7 +58,8 @@ final class ChargeResource
                 $response,
                 $params['payment_method'],
                 $params['amount_cents'],
-                $couponCode
+                $couponCode,
+                $customerId
             ),
             $couponCode === null ? null : fn (array $data): array => $this->validatedAmbiguousCouponData(
                 $data,
@@ -121,7 +125,8 @@ final class ChargeResource
         array $response,
         string $expectedPaymentMethod,
         int $expectedAmount,
-        ?string $expectedCouponCode
+        ?string $expectedCouponCode,
+        ?string $expectedCustomerId
     ): array
     {
         $data = $this->data($response);
@@ -141,6 +146,11 @@ final class ChargeResource
                 || !hash_equals($expectedPaymentMethod, $data['payment_method']))) {
             throw new \UnexpectedValueException('Resposta 2xx diverge do payment_method solicitado.');
         }
+        $this->validateCustomerEcho(
+            $data,
+            $expectedCustomerId,
+            'Resposta 2xx diverge do customer solicitado.'
+        );
         if (($expectedCouponCode !== null && $amount > $expectedAmount)
             || ($expectedCouponCode === null && $amount !== $expectedAmount)) {
             throw new \UnexpectedValueException('Resposta 2xx com valor financeiro divergente.');
@@ -203,6 +213,26 @@ final class ChargeResource
         return $hasEvidence;
     }
 
+    /** @param array<string, mixed> $data */
+    private function validateCustomerEcho(array $data, ?string $expectedCustomerId, string $message): void
+    {
+        if ($expectedCustomerId === null) {
+            return;
+        }
+        $echoes = [];
+        if (array_key_exists('customer_id', $data)) {
+            $echoes[] = $data['customer_id'];
+        }
+        if (is_array($data['customer'] ?? null) && array_key_exists('id', $data['customer'])) {
+            $echoes[] = $data['customer']['id'];
+        }
+        foreach ($echoes as $echo) {
+            if (!is_string($echo) || !hash_equals($expectedCustomerId, $echo)) {
+                throw new \UnexpectedValueException($message);
+            }
+        }
+    }
+
     /**
      * @param array<string, mixed> $params
      * @return array<string, mixed>
@@ -249,7 +279,8 @@ final class ChargeResource
         }
         $this->validateCustomer($params['customer'] ?? null);
         foreach (['description', 'external_reference', 'affiliate_code', 'coupon_code'] as $field) {
-            if (is_string($params[$field] ?? null) && $this->containsPanLikeSequence($params[$field])) {
+            if (array_key_exists($field, $params)
+                && (!is_string($params[$field]) || $this->containsPanLikeSequence($params[$field]))) {
                 throw new \InvalidArgumentException($field . ' nao pode conter PAN.');
             }
         }
@@ -352,6 +383,11 @@ final class ChargeResource
                 || !hash_equals($filters['payment_method'], $data['payment_method']))) {
             throw new \UnexpectedValueException('Listagem retornou charge fora do payment_method solicitado.');
         }
+        $this->validateCustomerEcho(
+            $data,
+            is_string($filters['customer_id'] ?? null) ? $filters['customer_id'] : null,
+            'Listagem retornou charge fora do customer_id solicitado.'
+        );
         $from = $this->timestamp($filters['created_at_from'] ?? null, 'created_at_from');
         if ($from !== null && $this->compareTimestamps($createdAt, $from) < 0) {
             throw new \UnexpectedValueException('Listagem retornou charge anterior a created_at_from.');
@@ -667,7 +703,7 @@ final class ChargeResource
             }
             $character = $match[0];
             $offset += strlen($character);
-            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{Cf})\z/uD', $character) === 1) {
+            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf})\z/uD', $character) === 1) {
                 continue;
             }
             $reset();
