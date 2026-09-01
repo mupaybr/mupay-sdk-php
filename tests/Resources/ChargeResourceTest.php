@@ -281,8 +281,16 @@ final class ChargeResourceTest extends TestCase
         yield 'missing data' => ['{}', []];
         yield 'object data' => [json_encode(['data' => ['charge_id' => 'ch_1']], JSON_THROW_ON_ERROR), []];
         yield 'scalar item' => [json_encode(['data' => [123]], JSON_THROW_ON_ERROR), []];
+        yield 'more than 100 items' => [
+            json_encode(['data' => array_fill(0, 101, $valid)], JSON_THROW_ON_ERROR),
+            [],
+        ];
         yield 'missing economic field' => [
             json_encode(['data' => [array_diff_key($valid, ['amount_cents' => true])]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'amount below list minimum' => [
+            json_encode(['data' => [[...$valid, 'amount_cents' => 0]]], JSON_THROW_ON_ERROR),
             [],
         ];
         yield 'status outside filter' => [
@@ -302,7 +310,7 @@ final class ChargeResourceTest extends TestCase
     public function testAllAcceptsChargeInsideRequestedStatusAndWindow(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[{"charge_id":"ch_paid","status":"paid","amount_cents":100,"created_at":"2026-08-31T12:30:00Z"}]}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_paid","status":"paid","amount_cents":1,"created_at":"2026-08-31T12:30:00Z"}]}'),
         ]);
         $resource = new ChargeResource(
             new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
@@ -315,6 +323,25 @@ final class ChargeResourceTest extends TestCase
         ]), false);
 
         self::assertSame(['ch_paid'], array_column($charges, 'charge_id'));
+        self::assertCount(1, $http->requests());
+    }
+
+    public function testAllAcceptsMaximumPublicPageSize(): void
+    {
+        $item = [
+            'charge_id' => 'ch_page_item',
+            'status' => 'paid',
+            'amount_cents' => 1,
+            'created_at' => '2026-08-31T12:30:00Z',
+        ];
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => array_fill(0, 100, $item)], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        self::assertCount(100, iterator_to_array($resource->all(), false));
         self::assertCount(1, $http->requests());
     }
 
@@ -340,6 +367,36 @@ final class ChargeResourceTest extends TestCase
                 self::assertTrue(true);
             }
         }
+    }
+
+    /** @dataProvider dotSegmentCustomerIdProvider */
+    public function testChargeCustomerIdentifiersRejectDotSegmentsBeforeNetwork(string $id): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['customer']['id'] = $id;
+
+        foreach ([
+            static fn (): array => $resource->create($payload, 'idem_dot_customer'),
+            static fn (): array => iterator_to_array($resource->all(['customer_id' => $id]), false),
+        ] as $operation) {
+            try {
+                $operation();
+                self::fail('Dot-segment customer identifier reached a charge path.');
+            } catch (\InvalidArgumentException) {
+            }
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
+    public static function dotSegmentCustomerIdProvider(): iterable
+    {
+        yield 'single dot' => ['.'];
+        yield 'double dot' => ['..'];
     }
 
     public function testCreateRejectsIncompleteIdentityUnsupportedDescriptorAndUnsafeCardContext(): void

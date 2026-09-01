@@ -203,6 +203,7 @@ final class OutcomeUnknownTest extends TestCase
             'empty-code' => ['{"code":""}', 'empty-code-conflict-key'],
             'whitespace-code' => ['{"code":"   "}', 'whitespace-code-conflict-key'],
             'fallback-code' => ['{"code":"http_409"}', 'fallback-code-conflict-key'],
+            'unknown-code' => ['{"code":"future_conflict"}', 'unknown-code-conflict-key'],
         ];
     }
 
@@ -330,10 +331,11 @@ final class OutcomeUnknownTest extends TestCase
         }
     }
 
-    public function testFingerprintConflictIsDefinitiveWithoutPriorAmbiguity(): void
+    /** @dataProvider definitiveConflictCodeProvider */
+    public function testRecognizedConflictIsDefinitiveWithoutPriorAmbiguity(string $code): void
     {
         $http = new FakeHttpClient([
-            new Response(409, [], '{"code":"fingerprint_conflict"}'),
+            new Response(409, [], json_encode(['code' => $code], JSON_THROW_ON_ERROR)),
         ]);
         $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->threeRetries());
 
@@ -342,9 +344,16 @@ final class OutcomeUnknownTest extends TestCase
             self::fail('Expected API error.');
         } catch (ApiException $exception) {
             self::assertNotInstanceOf(OutcomeUnknownException::class, $exception);
-            self::assertSame('fingerprint_conflict', $exception->apiCode());
+            self::assertSame($code, $exception->apiCode());
             self::assertCount(1, $http->requests());
         }
+    }
+
+    public static function definitiveConflictCodeProvider(): iterable
+    {
+        yield 'fingerprint conflict' => ['fingerprint_conflict'];
+        yield 'idempotency fingerprint conflict' => ['idempotency_fingerprint_conflict'];
+        yield 'idempotency key reused' => ['idempotency_key_reused'];
     }
 
     /** @dataProvider invalidSuccessResponseProvider */

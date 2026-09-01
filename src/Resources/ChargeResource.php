@@ -229,7 +229,7 @@ final class ChargeResource
             || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {
             throw new \UnexpectedValueException('Listagem retornou status de charge invalido.');
         }
-        if (!is_int($amount) || $amount < 100 || $amount > self::MAX_MONEY_CENTS) {
+        if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Listagem retornou valor de charge invalido.');
         }
         try {
@@ -324,7 +324,7 @@ final class ChargeResource
         }
         if (isset($customer['id'])
             && (!is_string($customer['id'])
-                || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $customer['id']) !== 1)) {
+                || !$this->validResourceId($customer['id']))) {
             throw new \InvalidArgumentException('customer.id invalido.');
         }
         if (!is_string($customer['name'] ?? null)
@@ -353,7 +353,7 @@ final class ChargeResource
         }
         if (isset($params['customer_id'])
             && (!is_string($params['customer_id'])
-                || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $params['customer_id']) !== 1)) {
+                || !$this->validResourceId($params['customer_id']))) {
             throw new \InvalidArgumentException('customer_id invalido.');
         }
         if (isset($params['payment_method'])

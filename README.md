@@ -170,9 +170,9 @@ try {
 confirmada. `idempotencyKey()` retorna exatamente a chave enviada: persista-a e reconcilie ou repita
 somente o mesmo payload. Retries limitados cobrem transporte, `408`, `425`, `429`, `5xx` e
 `409/idempotency_in_progress`, usando backoff exponencial com jitter e `Retry-After` limitado.
-`409/idempotency_outcome_unknown` e desconhecido imediatamente; `fingerprint_conflict` e os demais
-`4xx` nao classificados como ambiguos sao definitivos somente quando nenhuma tentativa anterior
-ficou ambigua. Depois de uma
+`409/idempotency_outcome_unknown` e qualquer `409` sem codigo reconhecidamente definitivo ficam
+desconhecidos imediatamente. Somente `fingerprint_conflict`, `idempotency_fingerprint_conflict` e
+`idempotency_key_reused` sao definitivos quando nenhuma tentativa anterior ficou ambigua. Depois de uma
 ambiguidade, apenas um `2xx` JSON estrutural e financeiramente valido confirma o resultado; um `4xx`,
 `409` ou `429` posterior nao o redefine como definitivo.
 

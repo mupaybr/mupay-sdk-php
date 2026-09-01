@@ -20,6 +20,11 @@ final class ApiClient
 {
     private const MAX_REQUEST_BYTES = 1_048_576;
     private const MAX_CONFIGURED_RESPONSE_BYTES = 16_777_216;
+    private const DEFINITIVE_CONFLICT_CODES = [
+        'fingerprint_conflict',
+        'idempotency_fingerprint_conflict',
+        'idempotency_key_reused',
+    ];
 
     private readonly ClientInterface $httpClient;
     private readonly RetryPolicy $retryPolicy;
@@ -347,13 +352,7 @@ final class ApiClient
 
         return in_array($status, [408, 425], true)
             || $status >= 500
-            || ($status === 409
-                && ($responseCode === null
-                    || in_array(
-                        $responseCode,
-                        ['http_409', 'idempotency_in_progress', 'idempotency_outcome_unknown'],
-                        true
-                    )));
+            || ($status === 409 && !in_array($responseCode, self::DEFINITIVE_CONFLICT_CODES, true));
     }
 
     private function responseExceptionSnapshot(ResponseInterface $response): ApiException

@@ -69,7 +69,8 @@ final class PageIterator implements \IteratorAggregate
 
             if (!array_key_exists('data', $response)
                 || !is_array($response['data'])
-                || !array_is_list($response['data'])) {
+                || !array_is_list($response['data'])
+                || count($response['data']) > 100) {
                 throw new \RuntimeException('API retornou pagina de dados invalida.');
             }
             $items = [];
