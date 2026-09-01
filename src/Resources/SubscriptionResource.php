@@ -8,6 +8,15 @@ use MuPag\Sdk\Http\ApiClient;
 
 final class SubscriptionResource
 {
+    private const SCHEDULED_CANCEL_STATUSES = [
+        'trialing',
+        'active',
+        'past_due',
+        'unpaid',
+        'paused',
+        'incomplete',
+    ];
+
     public function __construct(private readonly ApiClient $client)
     {
     }
@@ -44,13 +53,20 @@ final class SubscriptionResource
             '/v1/subscriptions/' . rawurlencode($id) . '/cancel',
             $payload,
             $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey],
-            function (array $response) use ($id): array {
+            function (array $response) use ($id, $mode): array {
                 $data = is_array($response['data'] ?? null) ? $response['data'] : $response;
+                $status = $data['status'] ?? null;
+                $cancelAtPeriodEnd = $data['cancel_at_period_end'] ?? null;
                 if (!is_string($data['id'] ?? null)
                     || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $data['id']) !== 1
                     || $data['id'] !== $id
-                    || !is_string($data['status'] ?? null)
-                    || $data['status'] === '') {
+                    || !is_string($status)
+                    || !is_bool($cancelAtPeriodEnd)
+                    || ($mode === 'immediate'
+                        && ($status !== 'canceled' || $cancelAtPeriodEnd !== false))
+                    || ($mode === 'end_of_period'
+                        && (!in_array($status, self::SCHEDULED_CANCEL_STATUSES, true)
+                            || $cancelAtPeriodEnd !== true))) {
                     throw new \UnexpectedValueException('Resposta 2xx de subscription invalida.');
                 }
 
