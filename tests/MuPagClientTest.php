@@ -103,6 +103,66 @@ final class MuPagClientTest extends TestCase
         );
     }
 
+    public function testTestEnvironmentAcceptsHttpIpv6LoopbackWithPort(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(
+                201,
+                [],
+                '{"data":{"id":"ch_ipv6","status":"pending","amount_cents":1000}}'
+            ),
+        ]);
+        try {
+            $mupag = MuPagClient::test(
+                'sk_test_123',
+                $http,
+                RetryPolicy::none(),
+                baseUrl: 'http://[::1]:8080'
+            );
+        } catch (\InvalidArgumentException $exception) {
+            self::fail('Test IPv6 loopback was rejected: ' . $exception->getMessage());
+        }
+
+        $mupag->charges->create([
+            'amount_cents' => 1000,
+            'payment_method' => 'pix',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+        ], 'idem_ipv6');
+
+        self::assertSame('http', $http->lastRequest()->getUri()->getScheme());
+        self::assertSame('[::1]', $http->lastRequest()->getUri()->getHost());
+        self::assertSame(8080, $http->lastRequest()->getUri()->getPort());
+        self::assertSame('/v1/charges', $http->lastRequest()->getUri()->getPath());
+    }
+
+    public function testIpv6LoopbackAllowanceRemainsEnvironmentAndOriginBound(): void
+    {
+        foreach (
+            [
+                ['sk_test_123', Environment::Test, 'http://[::2]:8080'],
+                ['sk_test_123', Environment::Test, 'http://[::1].attacker.example:8080'],
+                ['sk_test_123', Environment::Test, 'http://[::1]@attacker.example:8080'],
+                ['sk_test_123', Environment::Test, 'http://[::1]:8080/path'],
+                ['sk_test_123', Environment::Test, 'http://[::1]:8080?token=x'],
+                ['sk_test_123', Environment::Test, 'http://[::1]:8080#fragment'],
+                ['sk_prd_123', Environment::Prd, 'http://[::1]:8080'],
+                ['sk_prd_123', Environment::Prd, 'https://[::1]:8080'],
+            ] as [$apiKey, $environment, $baseUrl]
+        ) {
+            try {
+                new MuPagClient($apiKey, $environment, baseUrl: $baseUrl);
+                self::fail('Unsafe IPv6 baseUrl was accepted: ' . $baseUrl);
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('baseUrl', $exception->getMessage());
+            }
+        }
+    }
+
     public function testApiKeyRequiresVisibleAscii(): void
     {
         foreach (["sk_test_line\nbreak", 'sk_test_não-ascii'] as $apiKey) {

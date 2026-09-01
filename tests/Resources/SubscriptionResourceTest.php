@@ -191,4 +191,34 @@ final class SubscriptionResourceTest extends TestCase
         }
         self::assertCount(0, $http->requests());
     }
+
+    #[DataProvider('nonCanonicalSubscriptionIdProvider')]
+    public function testCancelRejectsNonCanonicalSubscriptionIdBeforeNetwork(string $id): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->cancel($id, 'immediate', idempotencyKey: 'idem_cancel_invalid_id');
+        } catch (\InvalidArgumentException) {
+            self::assertCount(0, $http->requests());
+            return;
+        } catch (\Throwable $exception) {
+            self::fail('Non-canonical subscription ID reached the network: ' . $exception::class);
+        }
+
+        self::fail('Non-canonical subscription ID was accepted.');
+    }
+
+    public static function nonCanonicalSubscriptionIdProvider(): iterable
+    {
+        yield 'colon' => ['sub:123'];
+        yield 'slash' => ['sub/123'];
+        yield 'at sign' => ['sub@123'];
+        yield 'plus' => ['sub+123'];
+        yield 'percent' => ['sub%123'];
+        yield 'question mark' => ['sub?123'];
+    }
 }

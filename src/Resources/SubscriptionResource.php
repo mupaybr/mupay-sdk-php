@@ -36,7 +36,7 @@ final class SubscriptionResource
         ?string $idempotencyKey = null
     ): array
     {
-        if ($id === '' || strlen($id) > 256 || preg_match('/\A[\x21-\x7E]+\z/D', $id) !== 1) {
+        if (preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1) {
             throw new \InvalidArgumentException('Subscription ID invalido.');
         }
         if (!in_array($mode, ['immediate', 'end_of_period'], true)) {

@@ -115,7 +115,7 @@ final class MuPagClient
             ? strtolower($canonical['scheme'])
             : '';
         $loopback = $environment === Environment::Test
-            && in_array($host, ['localhost', '127.0.0.1', '::1'], true);
+            && in_array($host, ['localhost', '127.0.0.1', '::1', '[::1]'], true);
         $canonicalOrigin = $scheme === $canonicalScheme
             && $host === $canonicalHost
             && ($parts['port'] ?? null) === ($canonical['port'] ?? null);

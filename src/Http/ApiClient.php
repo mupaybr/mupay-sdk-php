@@ -537,7 +537,7 @@ final class ApiClient
         $parts = parse_url($baseUrl);
         $host = is_array($parts) && is_string($parts['host'] ?? null) ? strtolower($parts['host']) : '';
         $scheme = is_array($parts) && is_string($parts['scheme'] ?? null) ? strtolower($parts['scheme']) : '';
-        $loopback = in_array($host, ['localhost', '127.0.0.1', '::1'], true);
+        $loopback = in_array($host, ['localhost', '127.0.0.1', '::1', '[::1]'], true);
         $path = is_array($parts) && is_string($parts['path'] ?? null) ? $parts['path'] : '';
         if (!is_array($parts) || $host === '' || isset($parts['user']) || isset($parts['pass'])
             || isset($parts['query']) || isset($parts['fragment']) || !in_array($path, ['', '/'], true)
