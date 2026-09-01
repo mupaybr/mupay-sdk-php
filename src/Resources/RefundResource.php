@@ -262,9 +262,12 @@ final class RefundResource
         if ($expectedChargeId !== null && $chargeId !== $expectedChargeId) {
             throw new \UnexpectedValueException('Resposta 2xx com charge_id de refund divergente.');
         }
-        if ($correlateReason
-            && (!array_key_exists('reason', $data) || $data['reason'] !== $expectedReason)) {
-            throw new \UnexpectedValueException('Resposta 2xx com reason de refund divergente.');
+        if ($correlateReason) {
+            if (!array_key_exists('reason', $data) || $data['reason'] !== $expectedReason) {
+                throw new \UnexpectedValueException('Resposta 2xx com reason de refund divergente.');
+            }
+        } elseif (array_key_exists('reason', $data) && $data['reason'] !== null) {
+            throw new \UnexpectedValueException('Resposta 2xx com reason de refund nao solicitado.');
         }
 
         $data['refund_id'] = $id;

@@ -141,6 +141,104 @@ final class SubscriptionResourceTest extends TestCase
         yield 'omitted without requested reason' => [null, []];
     }
 
+    #[DataProvider('ambiguousAttemptProvider')]
+    public function testCancelCanonicalizesReasonBeforeSendingAndCorrelating(
+        bool $afterAmbiguousAttempt
+    ): void {
+        $responses = [];
+        if ($afterAmbiguousAttempt) {
+            $responses[] = new Response(503, [], '{"code":"temporarily_unavailable"}');
+        }
+        $responses[] = new Response(
+            200,
+            [],
+            '{"data":{"id":"sub_123","status":"canceled","cancel_at_period_end":false,"cancellation_reason":"customer_request"}}'
+        );
+        $http = new FakeHttpClient($responses);
+        $resource = new SubscriptionResource(
+            new ApiClient(
+                'sk_test_123',
+                'https://api.test.local',
+                $http,
+                $afterAmbiguousAttempt
+                    ? new RetryPolicy(1, 0, static function (int $delayMs): void {
+                    })
+                    : RetryPolicy::none()
+            )
+        );
+
+        $subscription = $resource->cancel(
+            'sub_123',
+            'immediate',
+            "\0 \x01customer_request\x02\t ",
+            'idem_cancel_canonical_reason'
+        );
+
+        self::assertSame('customer_request', $subscription['cancellation_reason']);
+        foreach ($http->requests() as $request) {
+            self::assertSame(
+                ['mode' => 'immediate', 'reason' => 'customer_request'],
+                json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR)
+            );
+        }
+    }
+
+    #[DataProvider('ambiguousAttemptProvider')]
+    public function testCancelCanonicalizesEmptyReasonToAbsent(bool $afterAmbiguousAttempt): void
+    {
+        $responses = [];
+        if ($afterAmbiguousAttempt) {
+            $responses[] = new Response(503, [], '{"code":"temporarily_unavailable"}');
+        }
+        $responses[] = new Response(
+            200,
+            [],
+            '{"data":{"id":"sub_123","status":"canceled","cancel_at_period_end":false,"cancellation_reason":null}}'
+        );
+        $http = new FakeHttpClient($responses);
+        $resource = new SubscriptionResource(
+            new ApiClient(
+                'sk_test_123',
+                'https://api.test.local',
+                $http,
+                $afterAmbiguousAttempt
+                    ? new RetryPolicy(1, 0, static function (int $delayMs): void {
+                    })
+                    : RetryPolicy::none()
+            )
+        );
+
+        $resource->cancel('sub_123', 'immediate', " \0\x01\t ", 'idem_cancel_empty_reason');
+
+        foreach ($http->requests() as $request) {
+            self::assertSame(
+                ['mode' => 'immediate'],
+                json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR)
+            );
+        }
+    }
+
+    public function testCancelRejectsInternalControlInReasonBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->cancel('sub_123', 'immediate', "customer\x01request");
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function ambiguousAttemptProvider(): iterable
+    {
+        yield 'direct response' => [false];
+        yield 'after ambiguous response' => [true];
+    }
+
     public function testCancelAcceptsNumericNonLuhnReason(): void
     {
         $http = new FakeHttpClient([

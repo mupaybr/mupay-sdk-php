@@ -700,7 +700,7 @@ final class ChargeResource
             if ($this->containsPanLikeSequence((string) $key)) {
                 throw new \InvalidArgumentException('Metadata contem possivel numero de cartao em uma chave.');
             }
-            $compact = preg_replace('/[^a-z0-9]/', '', strtolower((string) $key));
+            $compact = $this->compactSensitiveKey((string) $key);
             $sensitiveBase = (string) preg_replace(
                 '/(cvv|cvc|csc|cid|cav)[0-9]+/',
                 '$1',
@@ -728,6 +728,24 @@ final class ChargeResource
             }
             $this->rejectSensitiveFields($child, $depth + 1);
         }
+    }
+
+    private function compactSensitiveKey(string $key): string
+    {
+        if (preg_match('/[^\x00-\x7F]/', $key) === 1) {
+            if (!function_exists('iconv')) {
+                throw new \InvalidArgumentException(
+                    'Metadata com chave Unicode nao pode ser validada com seguranca.'
+                );
+            }
+            $normalized = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $key);
+            if ($normalized === false) {
+                throw new \InvalidArgumentException('Metadata contem chave Unicode invalida.');
+            }
+            $key = $normalized;
+        }
+
+        return (string) preg_replace('/[^a-z0-9]/', '', strtolower($key));
     }
 
     private function validatedMetadataSnapshot(mixed $value): mixed

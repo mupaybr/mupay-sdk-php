@@ -491,6 +491,46 @@ final class RefundResourceTest extends TestCase
         }
     }
 
+    #[DataProvider('ambiguousAttemptProvider')]
+    public function testCreateRejectsUnrequestedRefundReasonEcho(bool $afterAmbiguousAttempt): void
+    {
+        $responses = [];
+        if ($afterAmbiguousAttempt) {
+            $responses[] = new Response(503, [], '{"code":"temporarily_unavailable"}');
+        }
+        $responses[] = new Response(
+            202,
+            [],
+            '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested","reason":"fraud","requested_at":"2026-08-31T12:00:00Z"}'
+        );
+        $http = new FakeHttpClient($responses);
+        $resource = new RefundResource(
+            new ApiClient(
+                'sk_test_123',
+                'https://api.test',
+                $http,
+                $afterAmbiguousAttempt
+                    ? new RetryPolicy(1, 0, static function (int $delayMs): void {
+                    })
+                    : RetryPolicy::none()
+            )
+        );
+
+        try {
+            $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_unrequested_reason');
+            self::fail('An unrequested refund reason confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_refund_unrequested_reason', $exception->idempotencyKey());
+            self::assertCount($afterAmbiguousAttempt ? 2 : 1, $http->requests());
+        }
+    }
+
+    public static function ambiguousAttemptProvider(): iterable
+    {
+        yield 'direct response' => [false];
+        yield 'after ambiguous response' => [true];
+    }
+
     public function testGetAndListByChargeUseReconciliationEndpoints(): void
     {
         $http = new FakeHttpClient([

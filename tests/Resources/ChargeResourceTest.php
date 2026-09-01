@@ -694,6 +694,7 @@ final class ChargeResourceTest extends TestCase
 		yield 'NUL separators' => [['note' => "4111\0 1111\0 1111\0 1111"]];
 		yield 'Unicode control separators' => [['note' => "4111\u{0080}1111\u{0080}1111\u{0080}1111"]];
 		yield 'camel-case security code key' => [['securityCode' => '123']];
+		yield 'full-width CVV key' => [['ｃｖｖ' => '123']];
 		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
 		yield 'CVV2 key' => [['cvv2' => '123']];
 		yield 'CVC2 key' => [['cvc2' => '123']];

@@ -45,51 +45,64 @@ final class SubscriptionResource
         if (!in_array($mode, ['immediate', 'end_of_period'], true)) {
             throw new \InvalidArgumentException('mode deve ser immediate ou end_of_period.');
         }
-        if ($reason !== null && strlen($reason) > 500) {
+        $expectedReason = null;
+        if ($reason !== null) {
+            $canonicalReason = preg_replace('/\A[\x00-\x20]+|[\x00-\x20]+\z/D', '', $reason);
+            if ($canonicalReason === null) {
+                throw new \InvalidArgumentException('reason invalido para cancelamento.');
+            }
+            if ($canonicalReason !== '') {
+                $expectedReason = $canonicalReason;
+            }
+        }
+        if ($expectedReason !== null && strlen($expectedReason) > 500) {
             throw new \InvalidArgumentException('reason excede 500 caracteres.');
         }
-        if ($reason !== null && $this->containsPanLikeSequence($reason)) {
+        if ($expectedReason !== null
+            && (preg_match('/\p{Cc}/u', $expectedReason) !== 0
+                || $this->containsPanLikeSequence($expectedReason))) {
             throw new \InvalidArgumentException('reason invalido para cancelamento.');
         }
-        $expectedReason = $reason !== null && $reason !== '' ? $reason : null;
         $payload = ['mode' => $mode];
         if ($expectedReason !== null) {
             $payload['reason'] = $expectedReason;
         }
+        $validateResponse = function (array $response) use ($id, $mode, $expectedReason): array {
+            $data = is_array($response['data'] ?? null) ? $response['data'] : $response;
+            $status = $data['status'] ?? null;
+            $cancelAtPeriodEnd = $data['cancel_at_period_end'] ?? null;
+            if (array_key_exists('cancellation_reason', $data)) {
+                $actualReason = $data['cancellation_reason'];
+                if (($expectedReason === null && $actualReason !== null)
+                    || ($expectedReason !== null
+                        && (!is_string($actualReason)
+                            || !hash_equals($expectedReason, $actualReason)))) {
+                    throw new \UnexpectedValueException(
+                        'Resposta 2xx diverge do reason de cancelamento solicitado.'
+                    );
+                }
+            }
+            if (!is_string($data['id'] ?? null)
+                || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $data['id']) !== 1
+                || $data['id'] !== $id
+                || !is_string($status)
+                || !is_bool($cancelAtPeriodEnd)
+                || ($mode === 'immediate'
+                    && ($status !== 'canceled' || $cancelAtPeriodEnd !== false))
+                || ($mode === 'end_of_period'
+                    && (!in_array($status, self::SCHEDULED_CANCEL_STATUSES, true)
+                        || $cancelAtPeriodEnd !== true))) {
+                throw new \UnexpectedValueException('Resposta 2xx de subscription invalida.');
+            }
+
+            return $data;
+        };
         return $this->client->post(
             '/v1/subscriptions/' . rawurlencode($id) . '/cancel',
             $payload,
             $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey],
-            function (array $response) use ($id, $mode, $expectedReason): array {
-                $data = is_array($response['data'] ?? null) ? $response['data'] : $response;
-                $status = $data['status'] ?? null;
-                $cancelAtPeriodEnd = $data['cancel_at_period_end'] ?? null;
-                if (array_key_exists('cancellation_reason', $data)) {
-                    $actualReason = $data['cancellation_reason'];
-                    if (($expectedReason === null && $actualReason !== null)
-                        || ($expectedReason !== null
-                            && (!is_string($actualReason)
-                                || !hash_equals($expectedReason, $actualReason)))) {
-                        throw new \UnexpectedValueException(
-                            'Resposta 2xx diverge do reason de cancelamento solicitado.'
-                        );
-                    }
-                }
-                if (!is_string($data['id'] ?? null)
-                    || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $data['id']) !== 1
-                    || $data['id'] !== $id
-                    || !is_string($status)
-                    || !is_bool($cancelAtPeriodEnd)
-                    || ($mode === 'immediate'
-                        && ($status !== 'canceled' || $cancelAtPeriodEnd !== false))
-                    || ($mode === 'end_of_period'
-                        && (!in_array($status, self::SCHEDULED_CANCEL_STATUSES, true)
-                            || $cancelAtPeriodEnd !== true))) {
-                    throw new \UnexpectedValueException('Resposta 2xx de subscription invalida.');
-                }
-
-                return $data;
-            }
+            $validateResponse,
+            $validateResponse
         );
     }
 
