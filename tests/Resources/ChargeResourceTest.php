@@ -881,6 +881,91 @@ final class ChargeResourceTest extends TestCase
         yield 'double dot' => ['..'];
     }
 
+    public function testAllRejectsPanCustomerIdBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('customer_id');
+        try {
+            iterator_to_array($resource->all([
+                'customer_id' => '4111-1111-1111-1111',
+            ]), false);
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public function testAllAcceptsNumericNonLuhnCustomerId(): void
+    {
+        $http = new FakeHttpClient([new Response(200, [], '{"data":[]}')]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        self::assertSame(
+            [],
+            iterator_to_array($resource->all(['customer_id' => '8777777777771013']), false)
+        );
+        parse_str($http->lastRequest()->getUri()->getQuery(), $query);
+        self::assertSame('8777777777771013', $query['customer_id'] ?? null);
+        self::assertCount(1, $http->requests());
+    }
+
+    public function testCreateRejectsPanInitialMitReferenceBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['payment_method'] = 'credit_card';
+        $payload['card_token_id'] = 'token_123';
+        $payload['payer_ip'] = '203.0.113.10';
+        $payload['is_mit'] = true;
+        $payload['initial_mit_reference_id'] = '4111-1111-1111-1111';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('initial_mit_reference_id');
+        try {
+            $resource->create($payload, 'idem_mit_pan');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public function testCreateAcceptsNumericNonLuhnInitialMitReference(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"charge_id":"ch_mit","status":"pending","amount_cents":9900}}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['payment_method'] = 'credit_card';
+        $payload['card_token_id'] = 'token_123';
+        $payload['payer_ip'] = '203.0.113.10';
+        $payload['is_mit'] = true;
+        $payload['initial_mit_reference_id'] = '8777777777771013';
+
+        $resource->create($payload, 'idem_mit_non_luhn');
+
+        self::assertSame(
+            '8777777777771013',
+            json_decode(
+                (string) $http->lastRequest()->getBody(),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            )['initial_mit_reference_id'] ?? null
+        );
+        self::assertCount(1, $http->requests());
+    }
+
     public function testCreateRejectsIncompleteIdentityUnsupportedDescriptorAndUnsafeCardContext(): void
     {
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', new FakeHttpClient([]), RetryPolicy::none()));

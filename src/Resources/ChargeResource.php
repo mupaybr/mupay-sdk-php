@@ -304,7 +304,13 @@ final class ChargeResource
             throw new \InvalidArgumentException('payment_method invalido.');
         }
         $this->validateCustomer($params['customer'] ?? null);
-        foreach (['description', 'external_reference', 'affiliate_code', 'coupon_code'] as $field) {
+        foreach ([
+            'description',
+            'external_reference',
+            'affiliate_code',
+            'coupon_code',
+            'initial_mit_reference_id',
+        ] as $field) {
             if (array_key_exists($field, $params)
                 && (!is_string($params[$field]) || $this->containsPanLikeSequence($params[$field]))) {
                 throw new \InvalidArgumentException($field . ' nao pode conter PAN.');
@@ -527,7 +533,8 @@ final class ChargeResource
         }
         if (isset($params['customer_id'])
             && (!is_string($params['customer_id'])
-                || !$this->validResourceId($params['customer_id']))) {
+                || !$this->validResourceId($params['customer_id'])
+                || $this->containsPanLikeSequence($params['customer_id']))) {
             throw new \InvalidArgumentException('customer_id invalido.');
         }
         if (isset($params['payment_method'])

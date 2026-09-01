@@ -540,9 +540,64 @@ final class ApiClient
 
     private function validateIdempotencyKey(mixed $key): void
     {
-        if (!is_string($key) || preg_match('/\A[\x21-\x7E]{1,128}\z/D', $key) !== 1) {
+        if (!is_string($key)
+            || preg_match('/\A[\x21-\x7E]{1,128}\z/D', $key) !== 1
+            || $this->containsPanLikeSequence($key)) {
             throw new \InvalidArgumentException('Idempotency-Key deve ter de 1 a 128 caracteres ASCII visiveis.');
         }
+    }
+
+    private function containsPanLikeSequence(string $value): bool
+    {
+        $digits = '';
+        $appendDigit = function (string $digit) use (&$digits): bool {
+            if (strlen($digits) === 19) {
+                $digits = substr($digits, 1);
+            }
+            $digits .= $digit;
+            for ($length = 12, $retained = strlen($digits); $length <= $retained; $length++) {
+                if ($this->validPanSequence(substr($digits, -$length))) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        for ($offset = 0, $byteLength = strlen($value); $offset < $byteLength; $offset++) {
+            $byte = ord($value[$offset]);
+            if ($byte >= 48 && $byte <= 57) {
+                if ($appendDigit($value[$offset])) {
+                    return true;
+                }
+                continue;
+            }
+            if (($byte >= 65 && $byte <= 90) || ($byte >= 97 && $byte <= 122)) {
+                $digits = '';
+            }
+        }
+        return false;
+    }
+
+    private function validPanSequence(string $digits): bool
+    {
+        $length = strlen($digits);
+        if ($length < 12 || $length > 19 || preg_match('/\A[0-9]+\z/D', $digits) !== 1) {
+            return false;
+        }
+        $sum = 0;
+        $doubleDigit = false;
+        for ($index = $length - 1; $index >= 0; $index--) {
+            $digit = ord($digits[$index]) - 48;
+            if ($doubleDigit) {
+                $digit *= 2;
+                if ($digit > 9) {
+                    $digit -= 9;
+                }
+            }
+            $sum += $digit;
+            $doubleDigit = !$doubleDigit;
+        }
+        return $sum % 10 === 0;
     }
 
     /**

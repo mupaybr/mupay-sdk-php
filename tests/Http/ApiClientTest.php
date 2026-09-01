@@ -157,6 +157,68 @@ final class ApiClientTest extends TestCase
         self::assertCount(0, $http->requests());
     }
 
+    #[DataProvider('mutationMethodProvider')]
+    public function testCallerSuppliedPanIdempotencyKeyIsRejectedBeforeEveryMutation(
+        string $method
+    ): void {
+        $http = new FakeHttpClient([
+            $method === 'POST' ? new Response(200, [], '{}') : new Response(204),
+        ]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none());
+
+        try {
+            if ($method === 'POST') {
+                $client->post(
+                    '/v1/test-resource',
+                    [],
+                    ['Idempotency-Key' => 'order-4111-1111-1111-1111']
+                );
+            } else {
+                $client->delete(
+                    '/v1/test-resource/res_123',
+                    ['Idempotency-Key' => 'order-4111-1111-1111-1111']
+                );
+            }
+            self::fail('PAN-like caller idempotency key reached the HTTP client.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('Idempotency-Key', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
+    #[DataProvider('mutationMethodProvider')]
+    public function testCallerSuppliedNumericNonLuhnIdempotencyKeyIsAccepted(
+        string $method
+    ): void {
+        $http = new FakeHttpClient([
+            $method === 'POST' ? new Response(200, [], '{}') : new Response(204),
+        ]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none());
+
+        if ($method === 'POST') {
+            $client->post(
+                '/v1/test-resource',
+                [],
+                ['Idempotency-Key' => '8777777777771013']
+            );
+        } else {
+            $client->delete(
+                '/v1/test-resource/res_123',
+                ['Idempotency-Key' => '8777777777771013']
+            );
+        }
+
+        self::assertSame('8777777777771013', $http->lastRequest()->getHeaderLine('Idempotency-Key'));
+        self::assertCount(1, $http->requests());
+    }
+
+    public static function mutationMethodProvider(): iterable
+    {
+        yield 'POST' => ['POST'];
+        yield 'DELETE' => ['DELETE'];
+    }
+
     public function testRequestAndResponseBodiesAreBounded(): void
     {
         $http = new FakeHttpClient([
