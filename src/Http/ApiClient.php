@@ -12,6 +12,7 @@ use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Utils;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
+use Psr\Http\Client\NetworkExceptionInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -133,7 +134,7 @@ final class ApiClient
         while (true) {
             try {
                 $response = $this->httpClient->sendRequest(new Request($method, $uri, $headers, $body));
-            } catch (ClientExceptionInterface $exception) {
+            } catch (NetworkExceptionInterface $exception) {
                 if ($idempotencyKey !== null && $ambiguousCause === null) {
                     $ambiguousCause = $exception;
                 }
@@ -148,6 +149,8 @@ final class ApiClient
                 $this->retryPolicy->sleepBeforeRetry($attempt);
                 $attempt++;
                 continue;
+            } catch (ClientExceptionInterface $exception) {
+                throw new ApiException('Falha ao chamar a API MuPag.', 0, previous: $exception);
             }
 
             try {

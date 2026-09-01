@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MuPag\Sdk\Tests\Http;
 
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\PumpStream;
 use MuPag\Sdk\Exception\ApiException;
@@ -17,6 +19,28 @@ use PHPUnit\Framework\TestCase;
 
 final class OutcomeUnknownTest extends TestCase
 {
+    public function testMutationRequestExceptionIsDefinitiveAndNotRetried(): void
+    {
+        $failure = new RequestException(
+            'Invalid request before dispatch',
+            new Request('POST', 'https://api.test.local/v1/charges')
+        );
+        $http = new FakeHttpClient([
+            $failure,
+            new Response(201, [], '{"charge_id":"ch_should_not_be_created"}'),
+        ]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->threeRetries());
+
+        try {
+            $client->post('/v1/charges', ['amount_cents' => 100]);
+            self::fail('Expected definitive request error.');
+        } catch (ApiException $exception) {
+            self::assertNotInstanceOf(OutcomeUnknownException::class, $exception);
+            self::assertSame($failure, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
     public function testMutationTransportFailureExposesUnknownOutcomeAndSentKey(): void
     {
         $http = new FakeHttpClient([new NetworkFailure('Response lost after request dispatch')]);
