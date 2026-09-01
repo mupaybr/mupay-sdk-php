@@ -1080,6 +1080,36 @@ final class ChargeResourceTest extends TestCase
         ]];
     }
 
+    #[DataProvider('malformedBooleanFieldProvider')]
+    public function testCreateRejectsMalformedBooleanFieldsBeforeNetwork(
+        string $field,
+        mixed $value
+    ): void {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['payment_method'] = 'credit_card';
+        $payload['card_token_id'] = 'token_123';
+        $payload['payer_ip'] = '203.0.113.10';
+        $payload[$field] = $value;
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_invalid_boolean');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function malformedBooleanFieldProvider(): iterable
+    {
+        yield 'auth_only string' => ['auth_only', 'false'];
+        yield 'save_card string' => ['save_card', 'true'];
+        yield 'is_mit integer' => ['is_mit', 1];
+    }
+
     #[DataProvider('panLikeCardTokenProvider')]
     public function testCreateCardRejectsPanLikeTokenBeforeNetwork(string $field, string $value): void
     {

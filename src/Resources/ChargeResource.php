@@ -372,6 +372,11 @@ final class ChargeResource
             || $params['amount_cents'] > self::MAX_MONEY_CENTS) {
             throw new \InvalidArgumentException('amount_cents invalido.');
         }
+        foreach (['auth_only', 'save_card', 'is_mit'] as $booleanField) {
+            if (array_key_exists($booleanField, $params) && !is_bool($params[$booleanField])) {
+                throw new \InvalidArgumentException($booleanField . ' deve ser booleano.');
+            }
+        }
         $paymentMethod = $params['payment_method'] ?? null;
         if (!in_array($paymentMethod, ['pix', 'credit_card'], true)) {
             throw new \InvalidArgumentException('payment_method invalido.');
