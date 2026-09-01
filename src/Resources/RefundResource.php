@@ -73,7 +73,7 @@ final class RefundResource
     /**
      * Lista estornos da cobrança por cursor keyset bounded.
      *
-     * @return array{refunds: list<array<string, mixed>>, next_cursor?: string}
+     * @return array{refunds: list<array<string, mixed>>, next_cursor?: string|null}
      */
     public function listByCharge(string $chargeId, ?int $limit = null, ?string $cursor = null): array
     {
@@ -121,7 +121,7 @@ final class RefundResource
         }
 
         $response['refunds'] = $validatedRefunds;
-        /** @var array{refunds: list<array<string, mixed>>, next_cursor?: string} $response */
+        /** @var array{refunds: list<array<string, mixed>>, next_cursor?: string|null} $response */
         return $response;
     }
 

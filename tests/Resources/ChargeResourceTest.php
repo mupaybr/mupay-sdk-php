@@ -416,8 +416,6 @@ final class ChargeResourceTest extends TestCase
         yield 'non-canonical trailing bits' => ['{"data":[],"next_cursor":"Zh"}'];
         yield 'padded base64url' => ['{"data":[],"next_cursor":"Zg=="}'];
         yield 'outside base64url alphabet' => ['{"data":[],"next_cursor":"bad cursor"}'];
-        yield 'root empty string' => ['{"data":[],"next_cursor":""}'];
-        yield 'meta empty string' => ['{"data":[],"meta":{"next_cursor":""}}'];
     }
 
     /** @dataProvider terminalPaginationCursorProvider */
@@ -443,6 +441,8 @@ final class ChargeResourceTest extends TestCase
         yield 'missing' => ['{"data":[' . $item . ']}'];
         yield 'root null' => ['{"data":[' . $item . '],"next_cursor":null}'];
         yield 'meta null' => ['{"data":[' . $item . '],"meta":{"next_cursor":null}}'];
+        yield 'root empty string' => ['{"data":[' . $item . '],"next_cursor":""}'];
+        yield 'meta empty string' => ['{"data":[' . $item . '],"meta":{"next_cursor":""}}'];
     }
 
     /** @dataProvider invalidChargePageProvider */
@@ -626,6 +626,24 @@ final class ChargeResourceTest extends TestCase
         try {
             $resource->create($payload, 'idem_recursive_metadata');
             self::fail('Recursive metadata was accepted.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
+    public function testCreateRejectsListMetadataAtTheRootBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = ['safe'];
+
+        try {
+            $resource->create($payload, 'idem_list_metadata');
+            self::fail('List metadata was accepted at the root.');
         } catch (\InvalidArgumentException) {
         }
 

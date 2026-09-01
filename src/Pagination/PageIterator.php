@@ -55,6 +55,9 @@ final class PageIterator implements \IteratorAggregate
             } else {
                 $cursor = null;
             }
+            if ($cursor === '') {
+                $cursor = null;
+            }
             if ($cursor !== null) {
                 if (!CursorValidator::isCanonicalBase64Url($cursor)) {
                     throw new \RuntimeException('API retornou cursor invalido durante paginacao.');

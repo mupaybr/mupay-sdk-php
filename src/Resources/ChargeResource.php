@@ -595,6 +595,10 @@ final class ChargeResource
             throw new \InvalidArgumentException('Metadata deve ser serializavel como JSON.', previous: $exception);
         }
 
+        if (!is_object($decoded)) {
+            throw new \InvalidArgumentException('Metadata deve ser um objeto JSON.');
+        }
+
         $this->rejectSensitiveFields($decoded);
         $this->rejectDecodedPanValues($decoded);
         return $decoded;
