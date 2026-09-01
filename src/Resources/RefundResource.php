@@ -224,6 +224,20 @@ final class RefundResource
         if (!$this->validTimestamp($data['requested_at'] ?? null)) {
             throw new \UnexpectedValueException('Resposta 2xx sem requested_at de refund valido.');
         }
+        foreach (['psp_refund_id', 'reason', 'failure_reason'] as $optionalString) {
+            if (array_key_exists($optionalString, $data)
+                && $data[$optionalString] !== null
+                && !is_string($data[$optionalString])) {
+                throw new \UnexpectedValueException(
+                    sprintf('Resposta 2xx com %s de refund invalido.', $optionalString)
+                );
+            }
+        }
+        if (array_key_exists('completed_at', $data)
+            && $data['completed_at'] !== null
+            && !$this->validTimestamp($data['completed_at'])) {
+            throw new \UnexpectedValueException('Resposta 2xx com completed_at de refund invalido.');
+        }
         if ($expectedAmount !== null && $amount !== $expectedAmount) {
             throw new \UnexpectedValueException('Resposta 2xx com valor de refund divergente.');
         }

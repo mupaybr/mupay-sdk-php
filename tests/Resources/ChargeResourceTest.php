@@ -188,6 +188,15 @@ final class ChargeResourceTest extends TestCase
         yield 'contradictory evidence' => [
             '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"coupon_code":"OTHER","original_amount_cents":9900}}',
         ];
+        yield 'gross amount with different coupon' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":9900,"coupon_code":"OTHER"}}',
+        ];
+        yield 'gross amount with different original amount' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":9900,"original_amount_cents":10000}}',
+        ];
+        yield 'gross amount with different subtotal amount' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":9900,"amount_subtotal_cents":10000}}',
+        ];
     }
 
     #[DataProvider('correlatedCouponRetryResponseProvider')]
@@ -554,8 +563,15 @@ final class ChargeResourceTest extends TestCase
     {
         yield 'spaces and hyphens' => [['note' => '4111 1111-1111 1111']];
         yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
+		yield 'symbol separators' => [['note' => '4111+1111=1111|1111']];
 		yield 'camel-case security code key' => [['securityCode' => '123']];
 		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
+		yield 'CVV2 key' => [['cvv2' => '123']];
+		yield 'CVC2 key' => [['cvc2' => '123']];
+		yield 'prefixed CVV key' => [['cardCvv' => '123']];
+		yield 'prefixed security code key' => [['card_security_code' => '123']];
+		yield 'verification code key' => [['cardVerificationCode' => '123']];
+		yield 'verification value key' => [['card_verification_value' => '123']];
 		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
 		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];

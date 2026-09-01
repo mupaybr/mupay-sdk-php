@@ -316,8 +316,8 @@ final class RefundResourceTest extends TestCase
     public function testGetAndListByChargeUseReconciliationEndpoints(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}'),
-            new Response(200, [], '{"refunds":[{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}],"next_cursor":"Zm8"}'),
+            new Response(200, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","psp_refund_id":null,"reason":null,"requested_at":"2026-08-31T12:00:00Z","completed_at":null,"failure_reason":null}'),
+            new Response(200, [], '{"refunds":[{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"completed","psp_refund_id":null,"reason":null,"requested_at":"2026-08-31T12:00:00Z","completed_at":null,"failure_reason":null}],"next_cursor":"Zm8"}'),
         ]);
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
 
@@ -372,6 +372,10 @@ final class RefundResourceTest extends TestCase
         yield 'missing charge ID' => [[...$valid, 'charge_id' => null]];
         yield 'invalid amount' => [[...$valid, 'amount_cents' => 0]];
         yield 'invalid status' => [[...$valid, 'status' => 'mystery']];
+        yield 'invalid PSP refund ID type' => [[...$valid, 'psp_refund_id' => 42]];
+        yield 'invalid reason type' => [[...$valid, 'reason' => false]];
+        yield 'invalid completed timestamp' => [[...$valid, 'completed_at' => []]];
+        yield 'invalid failure reason type' => [[...$valid, 'failure_reason' => ['message' => 'failed']]];
     }
 
     public function testListByChargeNormalizesEveryRefundWithoutInventingAmountCorrelation(): void
@@ -626,6 +630,7 @@ final class RefundResourceTest extends TestCase
             'charge_id' => 'ch_123',
             'amount_cents' => 500,
             'status' => 'completed',
+            'requested_at' => '2026-08-31T12:00:00Z',
         ];
 
         yield 'missing refund ID' => [[...$valid, 'refund_id' => null]];
@@ -633,6 +638,10 @@ final class RefundResourceTest extends TestCase
         yield 'different charge ID' => [[...$valid, 'charge_id' => 'ch_other']];
         yield 'invalid amount' => [[...$valid, 'amount_cents' => 0]];
         yield 'invalid status' => [[...$valid, 'status' => 'mystery']];
+        yield 'invalid PSP refund ID type' => [[...$valid, 'psp_refund_id' => 42]];
+        yield 'invalid reason type' => [[...$valid, 'reason' => false]];
+        yield 'invalid completed timestamp' => [[...$valid, 'completed_at' => []]];
+        yield 'invalid failure reason type' => [[...$valid, 'failure_reason' => ['message' => 'failed']]];
     }
 
     public function testReadsRejectUnsafeIdentifiersAndPaginationBeforeNetwork(): void

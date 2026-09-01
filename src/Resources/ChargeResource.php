@@ -149,10 +149,6 @@ final class ChargeResource
         int $expectedAmount,
         string $expectedCouponCode
     ): array {
-        if (($data['amount_cents'] ?? null) === $expectedAmount) {
-            return $data;
-        }
-
         $hasEvidence = false;
         if (array_key_exists('coupon_code', $data)) {
             if (!is_string($data['coupon_code'])
@@ -169,6 +165,9 @@ final class ChargeResource
                 throw new \UnexpectedValueException('Resposta 2xx diverge do valor anterior ao desconto.');
             }
             $hasEvidence = true;
+        }
+        if (($data['amount_cents'] ?? null) === $expectedAmount) {
+            return $data;
         }
         if (!$hasEvidence) {
             throw new \UnexpectedValueException(
@@ -499,7 +498,13 @@ final class ChargeResource
         }
         foreach ($value as $key => $child) {
             $compact = preg_replace('/[^a-z0-9]/', '', strtolower((string) $key));
-            if (in_array($compact, ['pan', 'cvv', 'cvc', 'cardnumber', 'securitycode'], true)) {
+            $sensitiveBase = rtrim($compact, '0123456789');
+            if (in_array($compact, ['pan', 'cardnumber'], true)
+                || str_ends_with($sensitiveBase, 'cvv')
+                || str_ends_with($sensitiveBase, 'cvc')
+                || str_ends_with($sensitiveBase, 'securitycode')
+                || str_ends_with($sensitiveBase, 'verificationcode')
+                || str_ends_with($sensitiveBase, 'verificationvalue')) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
             $this->rejectSensitiveFields($child, $depth + 1);
@@ -587,7 +592,7 @@ final class ChargeResource
             }
             $character = $match[0];
             $offset += strlen($character);
-            if (preg_match('/\A(?:\s|\p{P})\z/uD', $character) === 1) {
+            if (preg_match('/\A(?:\s|\p{P}|\p{S})\z/uD', $character) === 1) {
                 continue;
             }
             $reset();
@@ -597,9 +602,7 @@ final class ChargeResource
 
     private function isAsciiMetadataSeparator(int $byte): bool
     {
-        return ($byte >= 9 && $byte <= 13)
-            || $byte === 32
-            || str_contains("!\"#%&'()*,-./:;?@[\\]_{}", chr($byte));
+        return !(($byte >= 65 && $byte <= 90) || ($byte >= 97 && $byte <= 122));
     }
 
     private function validPanSequence(string $digits): bool
