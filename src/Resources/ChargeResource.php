@@ -105,7 +105,7 @@ final class ChargeResource
         $data = $this->data($response);
         $id = $data['charge_id'] ?? $data['id'] ?? null;
         $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
-        if (!is_string($id) || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1) {
+        if (!is_string($id) || !$this->validResourceId($id)) {
             throw new \UnexpectedValueException('Resposta 2xx sem charge_id valido.');
         }
         if (!is_string($data['status'] ?? null) || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {

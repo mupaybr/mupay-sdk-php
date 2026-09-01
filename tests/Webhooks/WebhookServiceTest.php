@@ -22,6 +22,21 @@ final class WebhookServiceTest extends TestCase
         self::assertSame(['charge_id' => 'ch_123'], $event['data']);
     }
 
+    public function testConstructEventAcceptsUppercaseHexadecimalSignature(): void
+    {
+        $payload = '{"id":"evt_upper","type":"charge.paid","data":{"charge_id":"ch_123"}}';
+        $digest = strtoupper(hash_hmac('sha256', '1700000000.' . $payload, 'whsec_test'));
+
+        $event = (new WebhookService())->constructEvent(
+            $payload,
+            't=1700000000,v1=' . $digest,
+            'whsec_test',
+            1700000000
+        );
+
+        self::assertSame('evt_upper', $event['id']);
+    }
+
     /** @dataProvider invalidCanonicalDataProvider */
     public function testConstructEventRejectsNonObjectCanonicalData(string $payload): void
     {

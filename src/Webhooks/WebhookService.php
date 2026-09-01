@@ -50,7 +50,7 @@ final class WebhookService
         }
 
         $expected = hash_hmac('sha256', $timestampText . '.' . $payload, $secret);
-        if (!hash_equals($expected, $signature)) {
+        if (!hash_equals($expected, strtolower($signature))) {
             throw new WebhookVerificationException('Assinatura de webhook invalida.');
         }
 

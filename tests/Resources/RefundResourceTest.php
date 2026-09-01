@@ -54,6 +54,8 @@ final class RefundResourceTest extends TestCase
         yield 'missing amount' => ['{"refund_id":"rf_123","charge_id":"ch_123","status":"completed"}'];
         yield 'missing status' => ['{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500}'];
         yield 'unknown status' => ['{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"mystery"}'];
+        yield 'single-dot refund ID' => ['{"refund_id":".","charge_id":"ch_123","amount_cents":500,"status":"completed"}'];
+        yield 'double-dot refund ID' => ['{"refund_id":"..","charge_id":"ch_123","amount_cents":500,"status":"completed"}'];
     }
 
     public function testCreateNormalizesLegacyResponseIdToRefundId(): void

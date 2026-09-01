@@ -161,11 +161,10 @@ final class RefundResource
         $id = $data['refund_id'] ?? $data['id'] ?? null;
         $chargeId = $data['charge_id'] ?? null;
         $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
-        if (!is_string($id) || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1) {
+        if (!is_string($id) || !$this->validResourceId($id)) {
             throw new \UnexpectedValueException('Resposta 2xx sem refund_id valido.');
         }
-        if (!is_string($chargeId)
-            || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $chargeId) !== 1) {
+        if (!is_string($chargeId) || !$this->validResourceId($chargeId)) {
             throw new \UnexpectedValueException('Resposta 2xx sem charge_id de refund valido.');
         }
         if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
@@ -198,11 +197,16 @@ final class RefundResource
 
     private function validateResourceId(string $value, string $field): void
     {
-        if ($value === '.'
-            || $value === '..'
-            || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $value) !== 1) {
+        if (!$this->validResourceId($value)) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
+    }
+
+    private function validResourceId(string $value): bool
+    {
+        return $value !== '.'
+            && $value !== '..'
+            && preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $value) === 1;
     }
 
     /**
