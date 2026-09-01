@@ -693,6 +693,9 @@ final class ChargeResourceTest extends TestCase
 		yield 'prefixed CVV key' => [['cardCvv' => '123']];
 		yield 'prefixed CSC key' => [['cardCsc' => '123']];
 		yield 'prefixed CID key' => [['cardCid' => '1234']];
+		yield 'CAV2 key' => [['cav2' => '123']];
+		yield 'card CAV2 key' => [['cardCav2' => '123']];
+		yield 'numbered CAV value key' => [['cav2_value' => '123']];
 		yield 'Amex CID key' => [['amexCid' => '1234']];
 		yield 'American Express CID key' => [['americanExpressCid' => '1234']];
 		yield 'prefixed security code key' => [['card_security_code' => '123']];
@@ -715,7 +718,8 @@ final class ChargeResourceTest extends TestCase
 		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
 		yield 'JSON float' => [['note' => 4_111_111_111_111_111.0]];
-        yield 'nested value' => [['order' => [['note' => 'card 4111-1111-1111-1111']]]];
+		yield 'nested value' => [['order' => [['note' => 'card 4111-1111-1111-1111']]]];
+		yield 'PAN property name' => [['4111111111111111' => 'note']];
 		yield 'object value' => [['note' => (object) ['value' => '4111111111111111']]];
 		yield 'JsonSerializable value' => [['note' => new class implements \JsonSerializable {
 			/** @return array<string, string> */

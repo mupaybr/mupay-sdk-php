@@ -588,9 +588,12 @@ final class ChargeResource
             throw new \InvalidArgumentException('Payload excede o limite de profundidade.');
         }
         foreach ($value as $key => $child) {
+            if ($this->containsPanLikeSequence((string) $key)) {
+                throw new \InvalidArgumentException('Metadata contem possivel numero de cartao em uma chave.');
+            }
             $compact = preg_replace('/[^a-z0-9]/', '', strtolower((string) $key));
             $sensitiveBase = (string) preg_replace(
-                '/(cvv|cvc|csc|cid)[0-9]+/',
+                '/(cvv|cvc|csc|cid|cav)[0-9]+/',
                 '$1',
                 rtrim($compact, '0123456789')
             );
@@ -610,6 +613,7 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'verificationvalue')
                 || str_ends_with($sensitiveBase, 'verificationnumber')
                 || str_ends_with($sensitiveBase, 'cardidentificationnumber')
+                || preg_match('/(?:^|card)cav(?:value|code|number)?$/', $sensitiveBase) === 1
                 || preg_match('/(?:^|card|amex|americanexpress)(?:csc|cid)(?:value|code|number)?$/', $sensitiveBase) === 1) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
