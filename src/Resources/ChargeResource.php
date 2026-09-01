@@ -663,7 +663,7 @@ final class ChargeResource
             }
             $character = $match[0];
             $offset += strlen($character);
-            if (preg_match('/\A(?:\s|\p{P}|\p{S})\z/uD', $character) === 1) {
+            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{Cf})\z/uD', $character) === 1) {
                 continue;
             }
             $reset();

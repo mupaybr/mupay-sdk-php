@@ -658,6 +658,7 @@ final class ChargeResourceTest extends TestCase
         yield 'spaces and hyphens' => [['note' => '4111 1111-1111 1111']];
         yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
 		yield 'symbol separators' => [['note' => '4111+1111=1111|1111']];
+		yield 'Unicode format separators' => [['note' => "4111\u{200B}1111\u{200B}1111\u{200B}1111"]];
 		yield 'camel-case security code key' => [['securityCode' => '123']];
 		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
 		yield 'CVV2 key' => [['cvv2' => '123']];
