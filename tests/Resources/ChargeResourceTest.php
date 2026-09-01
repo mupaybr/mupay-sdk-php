@@ -502,6 +502,18 @@ final class ChargeResourceTest extends TestCase
             json_encode(['data' => [[...$valid, 'payment_method' => 'credit_card']]], JSON_THROW_ON_ERROR),
             ['payment_method' => 'pix'],
         ];
+        yield 'malformed payment method without filter' => [
+            json_encode(['data' => [[...$valid, 'payment_method' => []]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'unknown payment method without filter' => [
+            json_encode(['data' => [[...$valid, 'payment_method' => 'cash']]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'null payment method without filter' => [
+            json_encode(['data' => [[...$valid, 'payment_method' => null]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
         yield 'customer id outside filter' => [
             json_encode(['data' => [[...$valid, 'customer_id' => 'customer_b']]], JSON_THROW_ON_ERROR),
             ['customer_id' => 'customer_a'],
@@ -587,6 +599,7 @@ final class ChargeResourceTest extends TestCase
             'pix_qr_code' => 'base64-value',
             'pix_copy_paste' => '000201',
             'expires_at' => '2026-08-31T13:00:00Z',
+            'payment_method' => 'pix',
         ];
         $http = new FakeHttpClient([
             new Response(200, [], json_encode(['data' => [$item]], JSON_THROW_ON_ERROR)),

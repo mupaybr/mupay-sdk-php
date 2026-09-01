@@ -534,11 +534,17 @@ final class ChargeResource
         if (isset($filters['status']) && $data['status'] !== $filters['status']) {
             throw new \UnexpectedValueException('Listagem retornou charge fora do status solicitado.');
         }
-        if (isset($filters['payment_method'])
-            && array_key_exists('payment_method', $data)
-            && (!is_string($data['payment_method'])
-                || !hash_equals($filters['payment_method'], $data['payment_method']))) {
-            throw new \UnexpectedValueException('Listagem retornou charge fora do payment_method solicitado.');
+        if (array_key_exists('payment_method', $data)) {
+            if (!is_string($data['payment_method'])
+                || !in_array($data['payment_method'], ['pix', 'credit_card'], true)) {
+                throw new \UnexpectedValueException('Listagem retornou payment_method invalido.');
+            }
+            if (isset($filters['payment_method'])
+                && !hash_equals($filters['payment_method'], $data['payment_method'])) {
+                throw new \UnexpectedValueException(
+                    'Listagem retornou charge fora do payment_method solicitado.'
+                );
+            }
         }
         $this->validateCustomerEcho(
             $data,
