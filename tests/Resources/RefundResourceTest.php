@@ -548,6 +548,29 @@ final class RefundResourceTest extends TestCase
         self::assertSame('limit=25&cursor=Zg', $http->requests()[1]->getUri()->getQuery());
     }
 
+    public function testGetAndListAcceptStoredRefundReason(): void
+    {
+        $refund = [
+            'refund_id' => 'rf_123',
+            'charge_id' => 'ch_123',
+            'amount_cents' => 500,
+            'status' => 'completed',
+            'reason' => 'fraud',
+            'requested_at' => '2026-08-31T12:00:00Z',
+        ];
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode($refund, JSON_THROW_ON_ERROR)),
+            new Response(200, [], json_encode(['refunds' => [$refund]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        self::assertSame('fraud', $resource->get('rf_123')['reason']);
+        self::assertSame('fraud', $resource->listByCharge('ch_123')['refunds'][0]['reason']);
+        self::assertCount(2, $http->requests());
+    }
+
     public function testGetNormalizesLegacyFieldsAndCorrelatesRequestedRefundId(): void
     {
         $http = new FakeHttpClient([

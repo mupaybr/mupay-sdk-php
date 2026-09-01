@@ -43,14 +43,16 @@ final class RefundResource
                 expectedAmount: $params['amount_cents'] ?? null,
                 expectedChargeId: $chargeId,
                 expectedReason: array_key_exists('reason', $params) ? $params['reason'] : null,
-                correlateReason: array_key_exists('reason', $params)
+                correlateReason: array_key_exists('reason', $params),
+                validateReasonIntent: true
             ),
             fn (array $response): array => $this->validatedRefundDataAfterAmbiguous(
                 $response,
                 expectedAmount: $params['amount_cents'] ?? null,
                 expectedChargeId: $chargeId,
                 expectedReason: array_key_exists('reason', $params) ? $params['reason'] : null,
-                correlateReason: array_key_exists('reason', $params)
+                correlateReason: array_key_exists('reason', $params),
+                validateReasonIntent: true
             )
         );
     }
@@ -152,7 +154,8 @@ final class RefundResource
         ?string $expectedRefundId = null,
         ?string $expectedChargeId = null,
         ?string $expectedReason = null,
-        bool $correlateReason = false
+        bool $correlateReason = false,
+        bool $validateReasonIntent = false
     ): array {
         return $this->validatedRefund(
             $this->data($response),
@@ -160,7 +163,8 @@ final class RefundResource
             $expectedRefundId,
             $expectedChargeId,
             $expectedReason,
-            $correlateReason
+            $correlateReason,
+            $validateReasonIntent
         );
     }
 
@@ -174,7 +178,8 @@ final class RefundResource
         ?string $expectedRefundId = null,
         ?string $expectedChargeId = null,
         ?string $expectedReason = null,
-        bool $correlateReason = false
+        bool $correlateReason = false,
+        bool $validateReasonIntent = false
     ): array {
         $data = $this->validatedRefundData(
             $response,
@@ -182,7 +187,8 @@ final class RefundResource
             $expectedRefundId,
             $expectedChargeId,
             $expectedReason,
-            $correlateReason
+            $correlateReason,
+            $validateReasonIntent
         );
         if ($expectedAmount === null) {
             throw new \UnexpectedValueException(
@@ -203,7 +209,8 @@ final class RefundResource
         ?string $expectedRefundId = null,
         ?string $expectedChargeId = null,
         ?string $expectedReason = null,
-        bool $correlateReason = false
+        bool $correlateReason = false,
+        bool $validateReasonIntent = false
     ): array
     {
         $hasCanonicalId = array_key_exists('refund_id', $data);
@@ -262,11 +269,13 @@ final class RefundResource
         if ($expectedChargeId !== null && $chargeId !== $expectedChargeId) {
             throw new \UnexpectedValueException('Resposta 2xx com charge_id de refund divergente.');
         }
-        if ($correlateReason) {
+        if ($validateReasonIntent && $correlateReason) {
             if (!array_key_exists('reason', $data) || $data['reason'] !== $expectedReason) {
                 throw new \UnexpectedValueException('Resposta 2xx com reason de refund divergente.');
             }
-        } elseif (array_key_exists('reason', $data) && $data['reason'] !== null) {
+        } elseif ($validateReasonIntent
+            && array_key_exists('reason', $data)
+            && $data['reason'] !== null) {
             throw new \UnexpectedValueException('Resposta 2xx com reason de refund nao solicitado.');
         }
 

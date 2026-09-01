@@ -12,6 +12,8 @@ final class ChargeResource
 {
     private const MAX_MONEY_CENTS = 9_000_000_000_000_000;
     private const MAX_INPUT_NESTING_DEPTH = 32;
+    private const MIN_EXPIRATION_SECONDS = 60;
+    private const MAX_EXPIRATION_SECONDS = 2_147_483_647;
     private const ALLOWED_STATUSES = [
         'created',
         'pending',
@@ -376,6 +378,12 @@ final class ChargeResource
             if (array_key_exists($booleanField, $params) && !is_bool($params[$booleanField])) {
                 throw new \InvalidArgumentException($booleanField . ' deve ser booleano.');
             }
+        }
+        if (array_key_exists('expires_in_seconds', $params)
+            && (!is_int($params['expires_in_seconds'])
+                || $params['expires_in_seconds'] < self::MIN_EXPIRATION_SECONDS
+                || $params['expires_in_seconds'] > self::MAX_EXPIRATION_SECONDS)) {
+            throw new \InvalidArgumentException('expires_in_seconds invalido.');
         }
         $paymentMethod = $params['payment_method'] ?? null;
         if (!in_array($paymentMethod, ['pix', 'credit_card'], true)) {

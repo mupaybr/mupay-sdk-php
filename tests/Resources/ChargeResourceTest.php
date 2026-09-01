@@ -1110,6 +1110,63 @@ final class ChargeResourceTest extends TestCase
         yield 'is_mit integer' => ['is_mit', 1];
     }
 
+    #[DataProvider('invalidExpirationProvider')]
+    public function testCreateRejectsInvalidExpirationBeforeNetwork(mixed $expiresInSeconds): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['expires_in_seconds'] = $expiresInSeconds;
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_invalid_expiration');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function invalidExpirationProvider(): iterable
+    {
+        yield 'numeric string' => ['3600'];
+        yield 'array' => [[]];
+        yield 'below runtime minimum' => [59];
+        yield 'above int32' => [2_147_483_648];
+    }
+
+    #[DataProvider('validExpirationProvider')]
+    public function testCreateAcceptsSupportedExpirationBounds(int $expiresInSeconds): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"charge_id":"ch_expiry","status":"pending","amount_cents":9900}}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['expires_in_seconds'] = $expiresInSeconds;
+
+        $resource->create($payload, 'idem_valid_expiration');
+
+        self::assertSame(
+            $expiresInSeconds,
+            json_decode(
+                (string) $http->lastRequest()->getBody(),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            )['expires_in_seconds'] ?? null
+        );
+    }
+
+    public static function validExpirationProvider(): iterable
+    {
+        yield 'runtime minimum' => [60];
+        yield 'int32 maximum' => [2_147_483_647];
+    }
+
     #[DataProvider('panLikeCardTokenProvider')]
     public function testCreateCardRejectsPanLikeTokenBeforeNetwork(string $field, string $value): void
     {
