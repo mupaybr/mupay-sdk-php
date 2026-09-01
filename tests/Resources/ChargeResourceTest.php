@@ -130,6 +130,24 @@ final class ChargeResourceTest extends TestCase
         ];
     }
 
+    public function testCreateAcceptsDiscountedCouponAmountAndUnderReviewStatus(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900}}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['coupon_code'] = 'SAVE50';
+
+        $charge = $resource->create($payload, 'idem_coupon_charge');
+
+        self::assertSame('under_review', $charge['status']);
+        self::assertSame(4900, $charge['amount_cents']);
+        self::assertCount(1, $http->requests());
+    }
+
     public function testAllReturnsIteratorAcrossPages(): void
     {
         $http = new FakeHttpClient([
@@ -341,7 +359,50 @@ final class ChargeResourceTest extends TestCase
             new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
         );
 
-        self::assertCount(100, iterator_to_array($resource->all(), false));
+        self::assertCount(100, iterator_to_array($resource->all(['limit' => 100]), false));
+        self::assertCount(1, $http->requests());
+    }
+
+    public function testAllRejectsPagesBeyondTheEffectiveLimit(): void
+    {
+        $item = [
+            'charge_id' => 'ch_page_item',
+            'status' => 'paid',
+            'amount_cents' => 1,
+            'created_at' => '2026-08-31T12:30:00Z',
+        ];
+
+        foreach ([[[], 26], [['limit' => 2], 3]] as [$params, $count]) {
+            $http = new FakeHttpClient([
+                new Response(200, [], json_encode(['data' => array_fill(0, $count, $item)], JSON_THROW_ON_ERROR)),
+            ]);
+            $resource = new ChargeResource(
+                new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+            );
+
+            $rejected = false;
+            try {
+                iterator_to_array($resource->all($params), false);
+            } catch (\RuntimeException) {
+                $rejected = true;
+            }
+            self::assertTrue($rejected, 'Page larger than the effective limit was accepted.');
+            self::assertCount(1, $http->requests());
+        }
+    }
+
+    public function testAllAcceptsUnderReviewFilterAndItem(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":[{"charge_id":"ch_review","status":"under_review","amount_cents":100,"created_at":"2026-08-31T12:30:00Z"}]}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $charges = iterator_to_array($resource->all(['status' => 'under_review']), false);
+
+        self::assertSame('under_review', $charges[0]['status']);
         self::assertCount(1, $http->requests());
     }
 

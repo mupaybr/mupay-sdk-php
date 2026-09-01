@@ -15,6 +15,7 @@ final class ChargeResource
         'created',
         'pending',
         'authorized',
+        'under_review',
         'paid',
         'partially_refunded',
         'refunded',
@@ -45,7 +46,11 @@ final class ChargeResource
             '/v1/charges',
             $params,
             $this->idempotencyHeader($idempotencyKey),
-            fn (array $response): array => $this->validatedChargeData($response, $params['amount_cents'])
+            fn (array $response): array => $this->validatedChargeData(
+                $response,
+                $params['amount_cents'],
+                is_string($params['coupon_code'] ?? null) && trim($params['coupon_code']) !== ''
+            )
         );
     }
 
@@ -101,7 +106,7 @@ final class ChargeResource
      * @param array<string, mixed> $response
      * @return array<string, mixed>
      */
-    private function validatedChargeData(array $response, int $expectedAmount): array
+    private function validatedChargeData(array $response, int $expectedAmount, bool $allowDiscount): array
     {
         $data = $this->data($response);
         $id = $data['charge_id'] ?? $data['id'] ?? null;
@@ -115,7 +120,8 @@ final class ChargeResource
         if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor financeiro valido.');
         }
-        if ($amount !== $expectedAmount) {
+        if (($allowDiscount && $amount > $expectedAmount)
+            || (!$allowDiscount && $amount !== $expectedAmount)) {
             throw new \UnexpectedValueException('Resposta 2xx com valor financeiro divergente.');
         }
 
@@ -367,7 +373,7 @@ final class ChargeResource
         }
         if (isset($params['cursor'])
             && (!is_string($params['cursor'])
-                || preg_match('/\A[\x21-\x7E]{1,256}\z/D', $params['cursor']) !== 1)) {
+                || preg_match('/\A[A-Za-z0-9_-]{1,256}\z/D', $params['cursor']) !== 1)) {
             throw new \InvalidArgumentException('cursor invalido.');
         }
         $from = $this->timestamp($params['created_at_from'] ?? null, 'created_at_from');

@@ -30,9 +30,10 @@ final class PageIterator implements \IteratorAggregate
         $seenCursors = [];
         $pages = 0;
         $initialCursor = $params['cursor'] ?? null;
+        $effectiveLimit = is_int($params['limit'] ?? null) ? $params['limit'] : 25;
 
         if (is_string($initialCursor) && $initialCursor !== '') {
-            if (preg_match('/\A[\x21-\x7E]{1,256}\z/D', $initialCursor) !== 1) {
+            if (preg_match('/\A[A-Za-z0-9_-]{1,256}\z/D', $initialCursor) !== 1) {
                 throw new \InvalidArgumentException('cursor invalido.');
             }
             $seenCursors[$initialCursor] = true;
@@ -58,7 +59,7 @@ final class PageIterator implements \IteratorAggregate
                 throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
             }
             if (is_string($cursor) && $cursor !== '') {
-                if (preg_match('/\A[\x21-\x7E]{1,256}\z/D', $cursor) !== 1) {
+                if (preg_match('/\A[A-Za-z0-9_-]{1,256}\z/D', $cursor) !== 1) {
                     throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
                 }
                 if (isset($seenCursors[$cursor])) {
@@ -70,7 +71,7 @@ final class PageIterator implements \IteratorAggregate
             if (!array_key_exists('data', $response)
                 || !is_array($response['data'])
                 || !array_is_list($response['data'])
-                || count($response['data']) > 100) {
+                || count($response['data']) > $effectiveLimit) {
                 throw new \RuntimeException('API retornou pagina de dados invalida.');
             }
             $items = [];
