@@ -569,7 +569,7 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'cvcnumber')
                 || str_ends_with($sensitiveBase, 'securitycode')
                 || str_ends_with($sensitiveBase, 'securityvalue')
-                || str_ends_with($sensitiveBase, 'securitynumber')
+                || str_ends_with($sensitiveBase, 'cardsecuritynumber')
                 || str_ends_with($sensitiveBase, 'verificationcode')
                 || str_ends_with($sensitiveBase, 'verificationvalue')
                 || str_ends_with($sensitiveBase, 'verificationnumber')

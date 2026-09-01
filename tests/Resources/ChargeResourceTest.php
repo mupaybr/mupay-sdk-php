@@ -780,6 +780,7 @@ final class ChargeResourceTest extends TestCase
             'note' => '1000 0000 0000 1000',
             'taxIdentificationNumber' => 'BR-123',
             'orderIdentificationNumber' => 'order-123',
+            'accountSecurityNumber' => 'account-123',
         ];
 
         $charge = $resource->create($payload, 'idem_non_luhn_metadata');
