@@ -510,6 +510,42 @@ final class ChargeResourceTest extends TestCase
             json_encode(['data' => [[...$valid, 'customer' => ['id' => 'customer_b']]]], JSON_THROW_ON_ERROR),
             ['customer_id' => 'customer_a'],
         ];
+        yield 'null nested customer echo' => [
+            json_encode(['data' => [[...$valid, 'customer' => null]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'nested customer echo without id' => [
+            json_encode(['data' => [[...$valid, 'customer' => []]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'null nested customer id' => [
+            json_encode(['data' => [[...$valid, 'customer' => ['id' => null]]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'numeric optional PSP charge ID' => [
+            json_encode(['data' => [[...$valid, 'psp_charge_id' => 123]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'null non-nullable PSP charge ID' => [
+            json_encode(['data' => [[...$valid, 'psp_charge_id' => null]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'numeric optional card token ID' => [
+            json_encode(['data' => [[...$valid, 'card_token_id' => 123]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'malformed optional PIX QR code' => [
+            json_encode(['data' => [[...$valid, 'pix_qr_code' => []]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'malformed optional expires timestamp' => [
+            json_encode(['data' => [[...$valid, 'expires_at' => 'not-a-timestamp']]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'null non-nullable expires timestamp' => [
+            json_encode(['data' => [[...$valid, 'expires_at' => null]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
         yield 'before lower bound' => [
             json_encode(['data' => [[...$valid, 'created_at' => '2026-08-31T11:59:59Z']]], JSON_THROW_ON_ERROR),
             ['created_at_from' => '2026-08-31T12:00:00Z'],
@@ -536,6 +572,30 @@ final class ChargeResourceTest extends TestCase
         ]), false);
 
         self::assertSame(['ch_paid'], array_column($charges, 'charge_id'));
+        self::assertCount(1, $http->requests());
+    }
+
+    public function testAllAcceptsValidPublicOptionalFields(): void
+    {
+        $item = [
+            'charge_id' => 'ch_optional',
+            'status' => 'pending',
+            'amount_cents' => 100,
+            'created_at' => '2026-08-31T12:00:00Z',
+            'psp_charge_id' => 'psp_123',
+            'card_token_id' => 'token_123',
+            'pix_qr_code' => 'base64-value',
+            'pix_copy_paste' => '000201',
+            'expires_at' => '2026-08-31T13:00:00Z',
+        ];
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [$item]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        self::assertSame([$item], iterator_to_array($resource->all(), false));
         self::assertCount(1, $http->requests());
     }
 
@@ -693,6 +753,7 @@ final class ChargeResourceTest extends TestCase
 		yield 'Unicode combining marks' => [['note' => "4111\u{0301}1111\u{0301}1111\u{0301}1111"]];
 		yield 'NUL separators' => [['note' => "4111\0 1111\0 1111\0 1111"]];
 		yield 'Unicode control separators' => [['note' => "4111\u{0080}1111\u{0080}1111\u{0080}1111"]];
+		yield 'full-width decimal digits' => [['note' => '４１１１１１１１１１１１１１１１']];
 		yield 'camel-case security code key' => [['securityCode' => '123']];
 		yield 'full-width CVV key' => [['ｃｖｖ' => '123']];
 		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
@@ -1227,6 +1288,23 @@ final class ChargeResourceTest extends TestCase
         yield 'coupon code' => ['coupon_code'];
     }
 
+    public function testCreateRejectsUnicodeDecimalDigitsInFreeTextBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['description'] = 'card ４１１１１１１１１１１１１１１１';
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_unicode_digits');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
     public function testCreateRejectsNonStringFreeTextBeforeNetwork(): void
     {
         foreach ([
@@ -1330,6 +1408,10 @@ final class ChargeResourceTest extends TestCase
             'customer' => ['id' => 'customer_b'],
         ]];
         yield 'malformed assigned ID' => [['customer_id' => 123]];
+        yield 'null nested customer' => [['customer' => null]];
+        yield 'nested customer without ID' => [['customer' => []]];
+        yield 'null nested customer ID' => [['customer' => ['id' => null]]];
+        yield 'malformed nested customer ID' => [['customer' => ['id' => 123]]];
     }
 
     public function testCreateAcceptsMatchingAssignedCustomerAliases(): void

@@ -144,6 +144,9 @@ final class SubscriptionResource
             }
             $character = $match[0];
             $offset += strlen($character);
+            if (preg_match('/\A\p{Nd}\z/uD', $character) === 1) {
+                return true;
+            }
             if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf}|\p{Cc})\z/uD', $character) === 1) {
                 continue;
             }

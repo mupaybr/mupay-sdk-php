@@ -70,6 +70,7 @@ final class SubscriptionResourceTest extends TestCase
     {
         yield 'NUL' => ["4111\0 1111\0 1111\0 1111"];
         yield 'Unicode Cc' => ["4111\u{0080}1111\u{0080}1111\u{0080}1111"];
+        yield 'full-width decimal digits' => ['４１１１１１１１１１１１１１１１'];
     }
 
     #[DataProvider('contradictoryCancellationReasonProvider')]

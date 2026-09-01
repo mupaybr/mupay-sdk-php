@@ -178,33 +178,20 @@ final class ChargeResource
             $expectedCardTokenId,
             $allowGeneratedCardTokenId
         );
-        foreach ([
-            'psp_charge_id',
-            'card_brand',
-            'card_last4',
-            'three_ds_acs_url',
-            'failure_classification',
-            'pix_qr_code_base64',
-            'pix_emv_code',
-        ] as $optionalString) {
-            if (array_key_exists($optionalString, $data)
-                && $data[$optionalString] !== null
-                && !is_string($data[$optionalString])) {
-                throw new \UnexpectedValueException(
-                    sprintf('Resposta 2xx com %s de charge invalido.', $optionalString)
-                );
-            }
-        }
-        if (array_key_exists('expires_at', $data) && $data['expires_at'] !== null) {
-            try {
-                $this->timestamp($data['expires_at'], 'expires_at');
-            } catch (\InvalidArgumentException $exception) {
-                throw new \UnexpectedValueException(
-                    'Resposta 2xx com expires_at de charge invalido.',
-                    previous: $exception
-                );
-            }
-        }
+        $this->validateOptionalChargeResponseFields(
+            $data,
+            [
+                'psp_charge_id',
+                'card_brand',
+                'card_last4',
+                'three_ds_acs_url',
+                'failure_classification',
+                'pix_qr_code_base64',
+                'pix_emv_code',
+            ],
+            true,
+            'Resposta 2xx'
+        );
         if (($expectedCouponCode !== null && $amount > $expectedAmount)
             || ($expectedCouponCode === null && $amount !== $expectedAmount)) {
             throw new \UnexpectedValueException('Resposta 2xx com valor financeiro divergente.');
@@ -271,18 +258,26 @@ final class ChargeResource
     private function validateCustomerEcho(array $data, ?string $expectedCustomerId, string $message): void
     {
         $hasCustomerId = array_key_exists('customer_id', $data);
-        $hasNestedCustomerId = is_array($data['customer'] ?? null)
-            && array_key_exists('id', $data['customer']);
+        $hasCustomer = array_key_exists('customer', $data);
+        if ($hasCustomer
+            && (!is_array($data['customer']) || !array_key_exists('id', $data['customer']))) {
+            throw new \UnexpectedValueException($message);
+        }
+        $hasNestedCustomerId = $hasCustomer;
         if (!$hasCustomerId && !$hasNestedCustomerId) {
             return;
         }
         $customerId = $hasCustomerId ? $data['customer_id'] : null;
         $nestedCustomerId = $hasNestedCustomerId ? $data['customer']['id'] : null;
         $echoes = [[$hasCustomerId, $customerId], [$hasNestedCustomerId, $nestedCustomerId]];
-        foreach ($echoes as [$present, $echo]) {
-            if ($present && $echo !== null && (!is_string($echo) || !$this->validResourceId($echo))) {
-                throw new \UnexpectedValueException($message);
-            }
+        if ($hasCustomerId
+            && $customerId !== null
+            && (!is_string($customerId) || !$this->validResourceId($customerId))) {
+            throw new \UnexpectedValueException($message);
+        }
+        if ($hasNestedCustomerId
+            && (!is_string($nestedCustomerId) || !$this->validResourceId($nestedCustomerId))) {
+            throw new \UnexpectedValueException($message);
         }
         if ($hasCustomerId && $hasNestedCustomerId && $customerId !== $nestedCustomerId) {
             throw new \UnexpectedValueException($message);
@@ -317,6 +312,44 @@ final class ChargeResource
             return;
         }
         throw new \UnexpectedValueException('Resposta 2xx diverge de ' . $field . ' solicitado.');
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param list<string> $optionalStrings
+     */
+    private function validateOptionalChargeResponseFields(
+        array $data,
+        array $optionalStrings,
+        bool $nullable,
+        string $context
+    ): void {
+        foreach ($optionalStrings as $field) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            if (($data[$field] === null && !$nullable)
+                || ($data[$field] !== null && !is_string($data[$field]))) {
+                throw new \UnexpectedValueException($context . ' com ' . $field . ' invalido.');
+            }
+        }
+        if (!array_key_exists('expires_at', $data)) {
+            return;
+        }
+        if ($data['expires_at'] === null) {
+            if ($nullable) {
+                return;
+            }
+            throw new \UnexpectedValueException($context . ' com expires_at invalido.');
+        }
+        try {
+            $this->timestamp($data['expires_at'], 'expires_at');
+        } catch (\InvalidArgumentException $exception) {
+            throw new \UnexpectedValueException(
+                $context . ' com expires_at invalido.',
+                previous: $exception
+            );
+        }
     }
 
     /** @param array<string, mixed> $data */
@@ -492,6 +525,12 @@ final class ChargeResource
         if ($createdAt === null) {
             throw new \UnexpectedValueException('Listagem retornou charge sem created_at.');
         }
+        $this->validateOptionalChargeResponseFields(
+            $data,
+            ['psp_charge_id', 'card_token_id', 'pix_qr_code', 'pix_copy_paste'],
+            false,
+            'Listagem retornou charge'
+        );
         if (isset($filters['status']) && $data['status'] !== $filters['status']) {
             throw new \UnexpectedValueException('Listagem retornou charge fora do status solicitado.');
         }
@@ -847,6 +886,9 @@ final class ChargeResource
             }
             $character = $match[0];
             $offset += strlen($character);
+            if (preg_match('/\A\p{Nd}\z/uD', $character) === 1) {
+                return true;
+            }
             if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf}|\p{Cc})\z/uD', $character) === 1) {
                 continue;
             }
