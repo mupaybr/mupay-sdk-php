@@ -498,8 +498,8 @@ final class ChargeResource
             throw new \InvalidArgumentException('Payload excede o limite de profundidade.');
         }
         foreach ($value as $key => $child) {
-            $normalized = strtolower(str_replace('-', '_', (string) $key));
-            if (in_array($normalized, ['pan', 'cvv', 'cvc', 'card_number', 'cardnumber', 'security_code'], true)) {
+            $compact = preg_replace('/[^a-z0-9]/', '', strtolower((string) $key));
+            if (in_array($compact, ['pan', 'cvv', 'cvc', 'cardnumber', 'securitycode'], true)) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
             $this->rejectSensitiveFields($child, $depth + 1);
@@ -549,16 +549,11 @@ final class ChargeResource
     private function containsPanLikeSequence(string $value): bool
     {
         $digits = '';
-        $digitCount = 0;
-        $appendDigit = function (string $digit) use (&$digits, &$digitCount): bool {
+        $appendDigit = function (string $digit) use (&$digits): bool {
             if (strlen($digits) === 19) {
                 $digits = substr($digits, 1);
             }
             $digits .= $digit;
-            $digitCount++;
-            if ($digitCount <= 16) {
-                return false;
-            }
             for ($length = 12, $retained = strlen($digits); $length <= $retained; $length++) {
                 if ($this->validPanSequence(substr($digits, -$length))) {
                     return true;
@@ -566,11 +561,8 @@ final class ChargeResource
             }
             return false;
         };
-        $flush = function () use (&$digits, &$digitCount): bool {
-            $matched = $digitCount <= 16 && $this->validPanSequence($digits);
+        $reset = function () use (&$digits): void {
             $digits = '';
-            $digitCount = 0;
-            return $matched;
         };
 
         for ($offset = 0, $byteLength = strlen($value); $offset < $byteLength;) {
@@ -587,9 +579,7 @@ final class ChargeResource
                 if ($this->isAsciiMetadataSeparator($byte)) {
                     continue;
                 }
-                if ($flush()) {
-                    return true;
-                }
+                $reset();
                 continue;
             }
             if (preg_match('/\G./us', $value, $match, 0, $offset) !== 1) {
@@ -600,11 +590,9 @@ final class ChargeResource
             if (preg_match('/\A(?:\s|\p{P})\z/uD', $character) === 1) {
                 continue;
             }
-            if ($flush()) {
-                return true;
-            }
+            $reset();
         }
-        return $flush();
+        return false;
     }
 
     private function isAsciiMetadataSeparator(int $byte): bool

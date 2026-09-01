@@ -554,6 +554,8 @@ final class ChargeResourceTest extends TestCase
     {
         yield 'spaces and hyphens' => [['note' => '4111 1111-1111 1111']];
         yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
+		yield 'camel-case security code key' => [['securityCode' => '123']];
+		yield 'punctuated security code key' => [['nested' => ['security.code' => '123']]];
 		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
 		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
@@ -567,6 +569,20 @@ final class ChargeResourceTest extends TestCase
 				return ['value' => '4111111111111111'];
 			}
 		}]];
+
+		foreach ([
+			'412345678905',
+			'4123456789011',
+			'41234567890120',
+			'412345678901233',
+			'4123456789012349',
+			'41234567890123458',
+			'412345678901234561',
+			'4123456789012345677',
+		] as $pan) {
+			yield strlen($pan) . '-digit PAN with continuous prefix' => [['note' => '9' . $pan]];
+			yield strlen($pan) . '-digit PAN with continuous suffix' => [['note' => $pan . '9']];
+		}
     }
 
     public function testCreateAcceptsEquivalentNonLuhnMetadataValue(): void
@@ -578,7 +594,7 @@ final class ChargeResourceTest extends TestCase
             new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
         );
         $payload = $this->validPixChargePayload(100);
-        $payload['metadata'] = ['note' => '4111 1111 1111 1112'];
+        $payload['metadata'] = ['note' => '1000 0000 0000 1000'];
 
         $charge = $resource->create($payload, 'idem_non_luhn_metadata');
 
