@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MuPag\Sdk\Tests\Resources;
 
+use MuPag\Sdk\Exception\ApiException;
 use MuPag\Sdk\Exception\OutcomeUnknownException;
 use MuPag\Sdk\Http\ApiClient;
 use MuPag\Sdk\Http\RetryPolicy;
@@ -554,6 +555,7 @@ final class ChargeResourceTest extends TestCase
         yield 'spaces and hyphens' => [['note' => '4111 1111-1111 1111']];
         yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
 		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
+		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
 		yield 'JSON float' => [['note' => 4_111_111_111_111_111.0]];
         yield 'nested value' => [['order' => [['note' => 'card 4111-1111-1111-1111']]]];
@@ -582,6 +584,25 @@ final class ChargeResourceTest extends TestCase
 
         self::assertSame('charge_1', $charge['charge_id']);
         self::assertCount(1, $http->requests());
+    }
+
+    public function testCreateRejectsOversizedMetadataWithoutMaterializingCharacters(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = ['note' => str_repeat('x', 1_048_576)];
+
+        try {
+            $resource->create($payload, 'idem_oversized_metadata');
+            self::fail('Oversized metadata was accepted.');
+        } catch (ApiException $exception) {
+            self::assertSame('request_too_large', $exception->apiCode());
+        }
+
+        self::assertCount(0, $http->requests());
     }
 
     /** @dataProvider dotSegmentCustomerIdProvider */

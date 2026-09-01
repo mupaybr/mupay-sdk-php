@@ -548,53 +548,70 @@ final class ChargeResource
 
     private function containsPanLikeSequence(string $value): bool
     {
-        $characters = preg_split('//u', $value, -1, PREG_SPLIT_NO_EMPTY);
-        if ($characters === false) {
-            return false;
-        }
-        $groups = [];
         $digits = '';
-        $flushGroup = function () use (&$groups, &$digits): bool {
-            if ($digits === '') {
+        $digitCount = 0;
+        $appendDigit = function (string $digit) use (&$digits, &$digitCount): bool {
+            if (strlen($digits) === 19) {
+                $digits = substr($digits, 1);
+            }
+            $digits .= $digit;
+            $digitCount++;
+            if ($digitCount <= 16) {
                 return false;
             }
-            $groups[] = $digits;
-            $digits = '';
-            return $this->panInDigitGroups($groups);
+            for ($length = 12, $retained = strlen($digits); $length <= $retained; $length++) {
+                if ($this->validPanSequence(substr($digits, -$length))) {
+                    return true;
+                }
+            }
+            return false;
         };
-        foreach ($characters as $character) {
-            if (preg_match('/\A[0-9]\z/D', $character) === 1) {
-                $digits .= $character;
-            } elseif (preg_match('/\A(?:\s|\p{P})\z/uD', $character) === 1) {
-                if ($flushGroup()) {
+        $flush = function () use (&$digits, &$digitCount): bool {
+            $matched = $digitCount <= 16 && $this->validPanSequence($digits);
+            $digits = '';
+            $digitCount = 0;
+            return $matched;
+        };
+
+        for ($offset = 0, $byteLength = strlen($value); $offset < $byteLength;) {
+            $byte = ord($value[$offset]);
+            if ($byte >= 48 && $byte <= 57) {
+                if ($appendDigit($value[$offset])) {
                     return true;
                 }
-            } else {
-                if ($flushGroup()) {
+                $offset++;
+                continue;
+            }
+            if ($byte < 0x80) {
+                $offset++;
+                if ($this->isAsciiMetadataSeparator($byte)) {
+                    continue;
+                }
+                if ($flush()) {
                     return true;
                 }
-                $groups = [];
+                continue;
+            }
+            if (preg_match('/\G./us', $value, $match, 0, $offset) !== 1) {
+                return false;
+            }
+            $character = $match[0];
+            $offset += strlen($character);
+            if (preg_match('/\A(?:\s|\p{P})\z/uD', $character) === 1) {
+                continue;
+            }
+            if ($flush()) {
+                return true;
             }
         }
-        return $flushGroup();
+        return $flush();
     }
 
-    /** @param list<string> $groups */
-    private function panInDigitGroups(array $groups): bool
+    private function isAsciiMetadataSeparator(int $byte): bool
     {
-        foreach (array_keys($groups) as $start) {
-            $candidate = '';
-            for ($end = $start, $count = count($groups); $end < $count; $end++) {
-                if (strlen($candidate) + strlen($groups[$end]) > 19) {
-                    break;
-                }
-                $candidate .= $groups[$end];
-                if ($this->validPanSequence($candidate)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return ($byte >= 9 && $byte <= 13)
+            || $byte === 32
+            || str_contains("!\"#%&'()*,-./:;?@[\\]_{}", chr($byte));
     }
 
     private function validPanSequence(string $digits): bool
