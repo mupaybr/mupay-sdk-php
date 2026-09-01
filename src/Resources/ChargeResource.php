@@ -53,6 +53,10 @@ final class ChargeResource
         $externalReference = is_string($params['external_reference'] ?? null)
             ? $params['external_reference']
             : null;
+        $cardTokenId = is_string($params['card_token_id'] ?? null)
+            ? $params['card_token_id']
+            : null;
+        $allowGeneratedCardTokenId = $cardTokenId === null && ($params['save_card'] ?? null) === true;
         return $this->client->post(
             '/v1/charges',
             $params,
@@ -63,7 +67,9 @@ final class ChargeResource
                 $params['amount_cents'],
                 $couponCode,
                 $customerId,
-                $externalReference
+                $externalReference,
+                $cardTokenId,
+                $allowGeneratedCardTokenId
             ),
             $couponCode === null ? null : fn (array $data): array => $this->validatedAmbiguousCouponData(
                 $data,
@@ -131,7 +137,9 @@ final class ChargeResource
         int $expectedAmount,
         ?string $expectedCouponCode,
         ?string $expectedCustomerId,
-        ?string $expectedExternalReference
+        ?string $expectedExternalReference,
+        ?string $expectedCardTokenId,
+        bool $allowGeneratedCardTokenId
     ): array
     {
         $data = $this->data($response);
@@ -156,11 +164,44 @@ final class ChargeResource
             $expectedCustomerId,
             'Resposta 2xx diverge do customer solicitado.'
         );
-        if ($expectedExternalReference !== null
-            && array_key_exists('external_reference', $data)
-            && (!is_string($data['external_reference'])
-                || !hash_equals($expectedExternalReference, $data['external_reference']))) {
-            throw new \UnexpectedValueException('Resposta 2xx diverge da external_reference solicitada.');
+        $this->validateOptionalIntentEcho(
+            $data,
+            'external_reference',
+            $expectedExternalReference,
+            false
+        );
+        $this->validateOptionalIntentEcho(
+            $data,
+            'card_token_id',
+            $expectedCardTokenId,
+            $allowGeneratedCardTokenId
+        );
+        foreach ([
+            'psp_charge_id',
+            'card_brand',
+            'card_last4',
+            'three_ds_acs_url',
+            'failure_classification',
+            'pix_qr_code_base64',
+            'pix_emv_code',
+        ] as $optionalString) {
+            if (array_key_exists($optionalString, $data)
+                && $data[$optionalString] !== null
+                && !is_string($data[$optionalString])) {
+                throw new \UnexpectedValueException(
+                    sprintf('Resposta 2xx com %s de charge invalido.', $optionalString)
+                );
+            }
+        }
+        if (array_key_exists('expires_at', $data) && $data['expires_at'] !== null) {
+            try {
+                $this->timestamp($data['expires_at'], 'expires_at');
+            } catch (\InvalidArgumentException $exception) {
+                throw new \UnexpectedValueException(
+                    'Resposta 2xx com expires_at de charge invalido.',
+                    previous: $exception
+                );
+            }
         }
         if (($expectedCouponCode !== null && $amount > $expectedAmount)
             || ($expectedCouponCode === null && $amount !== $expectedAmount)) {
@@ -227,21 +268,53 @@ final class ChargeResource
     /** @param array<string, mixed> $data */
     private function validateCustomerEcho(array $data, ?string $expectedCustomerId, string $message): void
     {
-        if ($expectedCustomerId === null) {
+        $hasCustomerId = array_key_exists('customer_id', $data);
+        $hasNestedCustomerId = is_array($data['customer'] ?? null)
+            && array_key_exists('id', $data['customer']);
+        if (!$hasCustomerId && !$hasNestedCustomerId) {
             return;
         }
-        $echoes = [];
-        if (array_key_exists('customer_id', $data)) {
-            $echoes[] = $data['customer_id'];
-        }
-        if (is_array($data['customer'] ?? null) && array_key_exists('id', $data['customer'])) {
-            $echoes[] = $data['customer']['id'];
-        }
-        foreach ($echoes as $echo) {
-            if (!is_string($echo) || !hash_equals($expectedCustomerId, $echo)) {
+        $customerId = $hasCustomerId ? $data['customer_id'] : null;
+        $nestedCustomerId = $hasNestedCustomerId ? $data['customer']['id'] : null;
+        $echoes = [[$hasCustomerId, $customerId], [$hasNestedCustomerId, $nestedCustomerId]];
+        foreach ($echoes as [$present, $echo]) {
+            if ($present && $echo !== null && (!is_string($echo) || !$this->validResourceId($echo))) {
                 throw new \UnexpectedValueException($message);
             }
         }
+        if ($hasCustomerId && $hasNestedCustomerId && $customerId !== $nestedCustomerId) {
+            throw new \UnexpectedValueException($message);
+        }
+        if ($expectedCustomerId === null) {
+            return;
+        }
+        foreach ($echoes as [$present, $echo]) {
+            if ($present && (!is_string($echo) || !hash_equals($expectedCustomerId, $echo))) {
+                throw new \UnexpectedValueException($message);
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $data */
+    private function validateOptionalIntentEcho(
+        array $data,
+        string $field,
+        ?string $expected,
+        bool $allowGeneratedValue
+    ): void {
+        if (!array_key_exists($field, $data)) {
+            return;
+        }
+        $actual = $data[$field];
+        if ($expected === null) {
+            if ($actual === null
+                || ($allowGeneratedValue && is_string($actual) && $this->validResourceId($actual))) {
+                return;
+            }
+        } elseif (is_string($actual) && hash_equals($expected, $actual)) {
+            return;
+        }
+        throw new \UnexpectedValueException('Resposta 2xx diverge de ' . $field . ' solicitado.');
     }
 
     /** @param array<string, mixed> $data */

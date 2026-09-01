@@ -1200,6 +1200,255 @@ final class ChargeResourceTest extends TestCase
         }
     }
 
+    #[DataProvider('invalidAssignedCustomerEchoProvider')]
+    public function testCreateRejectsInvalidAssignedCustomerEchoWithoutRequestedCustomerId(
+        array $customerEcho
+    ): void {
+        $response = [
+            'data' => [
+                'charge_id' => 'ch_assigned_customer',
+                'status' => 'pending',
+                'amount_cents' => 9900,
+                ...$customerEcho,
+            ],
+        ];
+        $http = new FakeHttpClient([
+            new NetworkFailure('Response lost after request dispatch'),
+            new Response(200, [], json_encode($response, JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        unset($payload['customer']['id']);
+
+        try {
+            $resource->create($payload, 'idem_assigned_customer');
+            self::fail('Invalid assigned customer echo confirmed an ambiguous mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_assigned_customer', $exception->idempotencyKey());
+            self::assertCount(2, $http->requests());
+        }
+    }
+
+    public static function invalidAssignedCustomerEchoProvider(): iterable
+    {
+        yield 'conflicting aliases' => [[
+            'customer_id' => 'customer_a',
+            'customer' => ['id' => 'customer_b'],
+        ]];
+        yield 'null conflicts with assigned ID' => [[
+            'customer_id' => null,
+            'customer' => ['id' => 'customer_b'],
+        ]];
+        yield 'malformed assigned ID' => [['customer_id' => 123]];
+    }
+
+    public function testCreateAcceptsMatchingAssignedCustomerAliases(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'charge_id' => 'ch_assigned_customer',
+                'status' => 'pending',
+                'amount_cents' => 9900,
+                'customer_id' => 'customer_assigned',
+                'customer' => ['id' => 'customer_assigned'],
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        unset($payload['customer']['id']);
+
+        $charge = $resource->create($payload, 'idem_assigned_customer_match');
+
+        self::assertSame('customer_assigned', $charge['customer_id']);
+        self::assertCount(1, $http->requests());
+    }
+
+    #[DataProvider('unrequestedOptionalIntentEchoProvider')]
+    public function testCreateRejectsUnrequestedOptionalIntentEcho(
+        string $field,
+        string $value
+    ): void {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'charge_id' => 'ch_unrequested_echo',
+                'status' => 'pending',
+                'amount_cents' => 9900,
+                $field => $value,
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(OutcomeUnknownException::class);
+        $resource->create($this->validPixChargePayload(9900), 'idem_unrequested_echo');
+    }
+
+    public static function unrequestedOptionalIntentEchoProvider(): iterable
+    {
+        yield 'external reference' => ['external_reference', 'unexpected-reference'];
+        yield 'stored card token' => ['card_token_id', 'token_unexpected'];
+    }
+
+    public function testCreateAcceptsNullUnrequestedOptionalIntentEchoes(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'charge_id' => 'ch_null_echoes',
+                'status' => 'pending',
+                'amount_cents' => 9900,
+                'external_reference' => null,
+                'card_token_id' => null,
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $charge = $resource->create($this->validPixChargePayload(9900), 'idem_null_echoes');
+
+        self::assertNull($charge['external_reference']);
+        self::assertNull($charge['card_token_id']);
+    }
+
+    #[DataProvider('divergentCardTokenEchoProvider')]
+    public function testCreateRejectsDivergentRequestedCardTokenIdEcho(mixed $cardTokenId): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'charge_id' => 'ch_card_echo',
+                'status' => 'pending',
+                'amount_cents' => 9900,
+                'card_token_id' => $cardTokenId,
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['payment_method'] = 'credit_card';
+        $payload['card_token_id'] = 'token_expected';
+        $payload['payer_ip'] = '203.0.113.10';
+
+        $this->expectException(OutcomeUnknownException::class);
+        $resource->create($payload, 'idem_card_echo');
+    }
+
+    public static function divergentCardTokenEchoProvider(): iterable
+    {
+        yield 'different token' => ['token_other'];
+        yield 'null token' => [null];
+    }
+
+    public function testCreateAcceptsMatchingOrRequestedGeneratedCardTokenIdEcho(): void
+    {
+        foreach ([
+            ['card_token_id' => 'token_expected'],
+            ['card_token' => 'ephemeral_token', 'save_card' => true],
+        ] as $index => $cardInput) {
+            $echoedTokenId = $index === 0 ? 'token_expected' : 'token_generated';
+            $http = new FakeHttpClient([
+                new Response(200, [], json_encode(['data' => [
+                    'charge_id' => 'ch_card_' . $index,
+                    'status' => 'pending',
+                    'amount_cents' => 9900,
+                    'card_token_id' => $echoedTokenId,
+                ]], JSON_THROW_ON_ERROR)),
+            ]);
+            $resource = new ChargeResource(
+                new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+            );
+            $payload = $this->validPixChargePayload(9900);
+            $payload['payment_method'] = 'credit_card';
+            $payload['payer_ip'] = '203.0.113.10';
+            $payload += $cardInput;
+
+            $charge = $resource->create($payload, 'idem_card_valid_' . $index);
+
+            self::assertSame($echoedTokenId, $charge['card_token_id']);
+        }
+    }
+
+    #[DataProvider('invalidOptionalChargeResponseProvider')]
+    public function testCreateRejectsInvalidOptionalChargeResponseFields(
+        array $optionalFields,
+        bool $afterAmbiguousAttempt
+    ): void {
+        $response = new Response(200, [], json_encode(['data' => [
+            'charge_id' => 'ch_invalid_optional',
+            'status' => 'pending',
+            'amount_cents' => 9900,
+            ...$optionalFields,
+        ]], JSON_THROW_ON_ERROR));
+        $queue = $afterAmbiguousAttempt
+            ? [new NetworkFailure('Response lost after request dispatch'), $response]
+            : [$response];
+        $http = new FakeHttpClient($queue);
+        $resource = new ChargeResource(
+            new ApiClient(
+                'sk_test_123',
+                'https://api.test.local',
+                $http,
+                $afterAmbiguousAttempt ? $this->oneRetry() : RetryPolicy::none()
+            )
+        );
+
+        try {
+            $resource->create($this->validPixChargePayload(9900), 'idem_invalid_optional');
+            self::fail('Invalid optional charge response field confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_invalid_optional', $exception->idempotencyKey());
+            self::assertCount($afterAmbiguousAttempt ? 2 : 1, $http->requests());
+        }
+    }
+
+    public static function invalidOptionalChargeResponseProvider(): iterable
+    {
+        foreach ([false, true] as $afterAmbiguousAttempt) {
+            $suffix = $afterAmbiguousAttempt ? ' after ambiguity' : ' direct';
+            yield 'numeric psp_charge_id' . $suffix => [
+                ['psp_charge_id' => 123],
+                $afterAmbiguousAttempt,
+            ];
+            yield 'malformed expires_at' . $suffix => [
+                ['expires_at' => 'not-a-timestamp'],
+                $afterAmbiguousAttempt,
+            ];
+        }
+    }
+
+    public function testCreateAcceptsValidNullableOptionalChargeResponseFields(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'charge_id' => 'ch_valid_optional',
+                'status' => 'pending',
+                'amount_cents' => 9900,
+                'psp_charge_id' => null,
+                'card_token_id' => null,
+                'card_brand' => 'VISA',
+                'card_last4' => '1111',
+                'three_ds_acs_url' => null,
+                'failure_classification' => null,
+                'pix_qr_code_base64' => 'base64-value',
+                'pix_emv_code' => 'emv-value',
+                'expires_at' => '2026-08-31T12:00:00Z',
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $charge = $resource->create($this->validPixChargePayload(9900), 'idem_valid_optional');
+
+        self::assertSame('2026-08-31T12:00:00Z', $charge['expires_at']);
+        self::assertSame('VISA', $charge['card_brand']);
+    }
+
     public function testCreateRejectsConflictingLegacyAliases(): void
     {
         foreach ([

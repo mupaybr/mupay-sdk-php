@@ -51,18 +51,30 @@ final class SubscriptionResource
         if ($reason !== null && $this->containsPanLikeSequence($reason)) {
             throw new \InvalidArgumentException('reason invalido para cancelamento.');
         }
+        $expectedReason = $reason !== null && $reason !== '' ? $reason : null;
         $payload = ['mode' => $mode];
-        if ($reason !== null && $reason !== '') {
-            $payload['reason'] = $reason;
+        if ($expectedReason !== null) {
+            $payload['reason'] = $expectedReason;
         }
         return $this->client->post(
             '/v1/subscriptions/' . rawurlencode($id) . '/cancel',
             $payload,
             $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey],
-            function (array $response) use ($id, $mode): array {
+            function (array $response) use ($id, $mode, $expectedReason): array {
                 $data = is_array($response['data'] ?? null) ? $response['data'] : $response;
                 $status = $data['status'] ?? null;
                 $cancelAtPeriodEnd = $data['cancel_at_period_end'] ?? null;
+                if (array_key_exists('cancellation_reason', $data)) {
+                    $actualReason = $data['cancellation_reason'];
+                    if (($expectedReason === null && $actualReason !== null)
+                        || ($expectedReason !== null
+                            && (!is_string($actualReason)
+                                || !hash_equals($expectedReason, $actualReason)))) {
+                        throw new \UnexpectedValueException(
+                            'Resposta 2xx diverge do reason de cancelamento solicitado.'
+                        );
+                    }
+                }
                 if (!is_string($data['id'] ?? null)
                     || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $data['id']) !== 1
                     || $data['id'] !== $id

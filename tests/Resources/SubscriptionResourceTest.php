@@ -72,6 +72,75 @@ final class SubscriptionResourceTest extends TestCase
         yield 'Unicode Cc' => ["4111\u{0080}1111\u{0080}1111\u{0080}1111"];
     }
 
+    #[DataProvider('contradictoryCancellationReasonProvider')]
+    public function testCancelRejectsContradictoryCancellationReasonEcho(
+        ?string $requestedReason,
+        mixed $echoedReason
+    ): void {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'id' => 'sub_123',
+                'status' => 'canceled',
+                'cancel_at_period_end' => false,
+                'cancellation_reason' => $echoedReason,
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $this->expectException(OutcomeUnknownException::class);
+        $resource->cancel(
+            'sub_123',
+            'immediate',
+            $requestedReason,
+            'idem_cancel_reason_conflict'
+        );
+    }
+
+    public static function contradictoryCancellationReasonProvider(): iterable
+    {
+        yield 'different reason' => ['customer_request', 'other_reason'];
+        yield 'null after requested reason' => ['customer_request', null];
+        yield 'unrequested reason' => [null, 'unexpected_reason'];
+    }
+
+    #[DataProvider('compatibleCancellationReasonProvider')]
+    public function testCancelAcceptsCompatibleCancellationReasonEcho(
+        ?string $requestedReason,
+        array $reasonEcho
+    ): void {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['data' => [
+                'id' => 'sub_123',
+                'status' => 'canceled',
+                'cancel_at_period_end' => false,
+                ...$reasonEcho,
+            ]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $subscription = $resource->cancel(
+            'sub_123',
+            'immediate',
+            $requestedReason,
+            'idem_cancel_reason_match'
+        );
+
+        self::assertSame('sub_123', $subscription['id']);
+        self::assertCount(1, $http->requests());
+    }
+
+    public static function compatibleCancellationReasonProvider(): iterable
+    {
+        yield 'matching reason' => ['customer_request', ['cancellation_reason' => 'customer_request']];
+        yield 'omitted echo' => ['customer_request', []];
+        yield 'null without requested reason' => [null, ['cancellation_reason' => null]];
+        yield 'omitted without requested reason' => [null, []];
+    }
+
     public function testCancelAcceptsNumericNonLuhnReason(): void
     {
         $http = new FakeHttpClient([
