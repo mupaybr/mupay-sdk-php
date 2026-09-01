@@ -206,9 +206,21 @@ final class RefundResource
         bool $correlateReason = false
     ): array
     {
-        $id = $data['refund_id'] ?? $data['id'] ?? null;
+        $canonicalId = $data['refund_id'] ?? null;
+        $legacyId = $data['id'] ?? null;
+        if ($canonicalId !== null && $legacyId !== null && $canonicalId !== $legacyId) {
+            throw new \UnexpectedValueException('Resposta 2xx com aliases de refund_id divergentes.');
+        }
+        $id = $canonicalId ?? $legacyId;
         $chargeId = $data['charge_id'] ?? null;
-        $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
+        $canonicalAmount = $data['amount_cents'] ?? null;
+        $legacyAmount = $data['amount'] ?? null;
+        if ($canonicalAmount !== null
+            && $legacyAmount !== null
+            && $canonicalAmount !== $legacyAmount) {
+            throw new \UnexpectedValueException('Resposta 2xx com aliases de amount_cents divergentes.');
+        }
+        $amount = $canonicalAmount ?? $legacyAmount;
         if (!is_string($id) || !$this->validResourceId($id)) {
             throw new \UnexpectedValueException('Resposta 2xx sem refund_id valido.');
         }

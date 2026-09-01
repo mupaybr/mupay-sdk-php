@@ -74,6 +74,74 @@ final class RefundResourceTest extends TestCase
         self::assertSame('rf_legacy', $refund['id']);
     }
 
+    public function testCreateUsesLegacyIdWhenCanonicalIdIsNull(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"data":{"refund_id":null,"id":"rf_legacy","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $refund = $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_null_id');
+
+        self::assertSame('rf_legacy', $refund['refund_id']);
+        self::assertSame('rf_legacy', $refund['id']);
+    }
+
+    #[DataProvider('conflictingRefundAliasResponseProvider')]
+    public function testCreateRejectsConflictingCanonicalAndLegacyAliases(
+        string $responseBody
+    ): void {
+        $http = new FakeHttpClient([new Response(201, [], $responseBody)]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_alias_conflict');
+            self::fail('Conflicting refund aliases confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
+    public static function conflictingRefundAliasResponseProvider(): iterable
+    {
+        yield 'refund ID aliases' => [
+            '{"data":{"refund_id":"rf_123","id":"rf_other","charge_id":"ch_123","amount_cents":500,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
+        ];
+        yield 'amount aliases' => [
+            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"amount":501,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}',
+        ];
+    }
+
+    public function testCreateRejectsConflictingAmountAliasAfterAmbiguousRetry(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(503, [], '{"code":"temporarily_unavailable"}'),
+            new Response(201, [], '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"amount":501,"status":"completed","requested_at":"2026-08-31T12:00:00Z"}}'),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient(
+                'sk_test_123',
+                'https://api.test',
+                $http,
+                new RetryPolicy(1, 0, static function (int $delayMs): void {
+                })
+            )
+        );
+
+        try {
+            $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_alias_ambiguous');
+            self::fail('Conflicting amount alias confirmed an ambiguous mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_refund_alias_ambiguous', $exception->idempotencyKey());
+            self::assertCount(2, $http->requests());
+        }
+    }
+
     #[DataProvider('legacyAmountResponseProvider')]
     public function testCreateNormalizesLegacyAmountToAmountCents(string $responseBody): void
     {
