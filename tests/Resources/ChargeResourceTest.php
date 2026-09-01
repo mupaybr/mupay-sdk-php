@@ -572,6 +572,10 @@ final class ChargeResourceTest extends TestCase
 		yield 'prefixed security code key' => [['card_security_code' => '123']];
 		yield 'verification code key' => [['cardVerificationCode' => '123']];
 		yield 'verification value key' => [['card_verification_value' => '123']];
+		yield 'CVV value key' => [['cvv_value' => '123']];
+		yield 'CVC value key' => [['cvcValue' => '123']];
+		yield 'CVV code key' => [['cardCvvCode' => '123']];
+		yield 'CVC number key' => [['cardCvcNumber' => '123']];
 		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
 		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];

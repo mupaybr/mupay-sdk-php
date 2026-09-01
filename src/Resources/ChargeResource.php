@@ -502,6 +502,12 @@ final class ChargeResource
             if (in_array($compact, ['pan', 'cardnumber'], true)
                 || str_ends_with($sensitiveBase, 'cvv')
                 || str_ends_with($sensitiveBase, 'cvc')
+                || str_ends_with($sensitiveBase, 'cvvvalue')
+                || str_ends_with($sensitiveBase, 'cvcvalue')
+                || str_ends_with($sensitiveBase, 'cvvcode')
+                || str_ends_with($sensitiveBase, 'cvccode')
+                || str_ends_with($sensitiveBase, 'cvvnumber')
+                || str_ends_with($sensitiveBase, 'cvcnumber')
                 || str_ends_with($sensitiveBase, 'securitycode')
                 || str_ends_with($sensitiveBase, 'verificationcode')
                 || str_ends_with($sensitiveBase, 'verificationvalue')) {
