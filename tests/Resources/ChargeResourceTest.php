@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MuPag\Sdk\Tests\Resources;
 
+use MuPag\Sdk\Exception\OutcomeUnknownException;
 use MuPag\Sdk\Http\ApiClient;
 use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Resources\ChargeResource;
@@ -89,6 +90,43 @@ final class ChargeResourceTest extends TestCase
         ];
         yield 'canonical amount null' => [
             '{"data":{"charge_id":"ch_legacy","status":"pending","amount_cents":null,"amount":9900}}',
+        ];
+    }
+
+    #[DataProvider('mismatchedAmountResponseProvider')]
+    public function testCreateTreatsMismatchedResponseAmountAsOutcomeUnknown(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
+
+        try {
+            $resource->create([
+                'amount_cents' => 9900,
+                'payment_method' => 'pix',
+                'customer' => [
+                    'id' => 'customer_123',
+                    'name' => 'Ana Silva',
+                    'email' => 'ana@example.com',
+                    'tax_id' => '12345678901',
+                ],
+            ], 'idem_charge_amount_mismatch');
+            self::fail('Mismatched charge amount confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_charge_amount_mismatch', $exception->idempotencyKey());
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
+    public static function mismatchedAmountResponseProvider(): iterable
+    {
+        yield 'canonical amount' => [
+            '{"data":{"charge_id":"ch_123","status":"pending","amount_cents":9901}}',
+        ];
+        yield 'legacy amount' => [
+            '{"data":{"charge_id":"ch_123","status":"pending","amount":9901}}',
         ];
     }
 

@@ -44,7 +44,7 @@ final class ChargeResource
             '/v1/charges',
             $params,
             $this->idempotencyHeader($idempotencyKey),
-            fn (array $response): array => $this->validatedChargeData($response)
+            fn (array $response): array => $this->validatedChargeData($response, $params['amount_cents'])
         );
     }
 
@@ -95,7 +95,7 @@ final class ChargeResource
      * @param array<string, mixed> $response
      * @return array<string, mixed>
      */
-    private function validatedChargeData(array $response): array
+    private function validatedChargeData(array $response, int $expectedAmount): array
     {
         $data = $this->data($response);
         $id = $data['charge_id'] ?? $data['id'] ?? null;
@@ -108,6 +108,9 @@ final class ChargeResource
         }
         if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor financeiro valido.');
+        }
+        if ($amount !== $expectedAmount) {
+            throw new \UnexpectedValueException('Resposta 2xx com valor financeiro divergente.');
         }
 
         $data['charge_id'] = $id;

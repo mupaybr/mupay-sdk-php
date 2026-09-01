@@ -96,6 +96,36 @@ final class RefundResourceTest extends TestCase
         ];
     }
 
+    #[DataProvider('mismatchedPartialRefundAmountProvider')]
+    public function testCreateTreatsMismatchedPartialRefundAmountAsOutcomeUnknown(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], $responseBody),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_amount_mismatch');
+            self::fail('Mismatched partial refund amount confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_refund_amount_mismatch', $exception->idempotencyKey());
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
+    public static function mismatchedPartialRefundAmountProvider(): iterable
+    {
+        yield 'canonical amount' => [
+            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":501,"status":"completed"}}',
+        ];
+        yield 'legacy amount' => [
+            '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount":501,"status":"completed"}}',
+        ];
+    }
+
     /** @dataProvider documentedRefundStatusProvider */
     public function testCreateAcceptsDocumentedRefundStatuses(string $status): void
     {
@@ -160,6 +190,21 @@ final class RefundResourceTest extends TestCase
             ['full' => true, 'reason' => 'customer_request'],
             json_decode((string) $http->lastRequest()->getBody(), true, 512, JSON_THROW_ON_ERROR)
         );
+    }
+
+    public function testCreateFullRefundDoesNotInventAmountCorrelation(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(202, [], '{"refund_id":"rf_full","charge_id":"ch_123","amount_cents":750,"status":"requested"}'),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $refund = $resource->create('ch_123', ['full' => true], 'idem_refund_full_amount');
+
+        self::assertSame(750, $refund['amount_cents']);
+        self::assertCount(1, $http->requests());
     }
 
     public function testGetAndListByChargeUseReconciliationEndpoints(): void

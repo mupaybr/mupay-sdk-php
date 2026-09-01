@@ -36,7 +36,10 @@ final class RefundResource
             '/v1/charges/' . rawurlencode($chargeId) . '/refunds',
             $params,
             $this->idempotencyHeader($idempotencyKey),
-            fn (array $response): array => $this->validatedRefundData($response)
+            fn (array $response): array => $this->validatedRefundData(
+                $response,
+                $params['amount_cents'] ?? null
+            )
         );
     }
 
@@ -112,7 +115,7 @@ final class RefundResource
      * @param array<string, mixed> $response
      * @return array<string, mixed>
      */
-    private function validatedRefundData(array $response): array
+    private function validatedRefundData(array $response, ?int $expectedAmount): array
     {
         $data = $this->data($response);
         $id = $data['refund_id'] ?? $data['id'] ?? null;
@@ -126,6 +129,9 @@ final class RefundResource
         if (!is_string($data['status'] ?? null)
             || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {
             throw new \UnexpectedValueException('Resposta 2xx sem status de refund valido.');
+        }
+        if ($expectedAmount !== null && $amount !== $expectedAmount) {
+            throw new \UnexpectedValueException('Resposta 2xx com valor de refund divergente.');
         }
 
         $data['refund_id'] = $id;
