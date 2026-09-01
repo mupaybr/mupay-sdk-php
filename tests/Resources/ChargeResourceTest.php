@@ -150,6 +150,41 @@ final class ChargeResourceTest extends TestCase
         self::assertCount(1, $http->requests());
     }
 
+    #[DataProvider('conflictingCouponFirstResponseProvider')]
+    public function testCreateRejectsConflictingCouponEvidenceOnFirstResponse(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['coupon_code'] = 'SAVE50';
+
+        try {
+            $resource->create($payload, 'idem_conflicting_coupon');
+            self::fail('Conflicting coupon evidence confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_conflicting_coupon', $exception->idempotencyKey());
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
+    public static function conflictingCouponFirstResponseProvider(): iterable
+    {
+        yield 'different coupon' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"coupon_code":"OTHER"}}',
+        ];
+        yield 'different original amount' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"original_amount_cents":10000}}',
+        ];
+        yield 'different subtotal amount' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"amount_subtotal_cents":10000}}',
+        ];
+    }
+
     #[DataProvider('uncorrelatedCouponRetryResponseProvider')]
     public function testCreateKeepsOutcomeUnknownWhenAmbiguousRetryReturnsUncorrelatedCouponDiscount(
         string $responseBody
@@ -576,6 +611,9 @@ final class ChargeResourceTest extends TestCase
 		yield 'CVC value key' => [['cvcValue' => '123']];
 		yield 'CVV code key' => [['cardCvvCode' => '123']];
 		yield 'CVC number key' => [['cardCvcNumber' => '123']];
+		yield 'numbered CVV value key' => [['cvv2_value' => '123']];
+		yield 'numbered CVC code key' => [['cvc2Code' => '123']];
+		yield 'numbered compound CVV key' => [['cardCvv3Number' => '123']];
 		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
 		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
@@ -603,6 +641,41 @@ final class ChargeResourceTest extends TestCase
 			yield strlen($pan) . '-digit PAN with continuous prefix' => [['note' => '9' . $pan]];
 			yield strlen($pan) . '-digit PAN with continuous suffix' => [['note' => $pan . '9']];
 		}
+    }
+
+    public function testCreateSendsTheSameJsonSerializableMetadataSnapshotThatWasValidated(): void
+    {
+        $stateful = new class implements \JsonSerializable {
+            private int $calls = 0;
+
+            /** @return array<string, string> */
+            public function jsonSerialize(): array
+            {
+                $this->calls++;
+                return $this->calls === 1
+                    ? ['value' => 'safe']
+                    : ['card_number' => '4111111111111111'];
+            }
+
+            public function calls(): int
+            {
+                return $this->calls;
+            }
+        };
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"charge_id":"charge_1","status":"pending","amount_cents":100}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = ['stateful' => $stateful];
+
+        $resource->create($payload, 'idem_stateful_metadata');
+
+        $sent = json_decode((string) $http->lastRequest()->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(['stateful' => ['value' => 'safe']], $sent['metadata']);
+        self::assertSame(1, $stateful->calls());
     }
 
     public function testCreateAcceptsEquivalentNonLuhnMetadataValue(): void

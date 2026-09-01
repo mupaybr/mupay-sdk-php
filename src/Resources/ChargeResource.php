@@ -42,7 +42,7 @@ final class ChargeResource
      */
     public function create(array $params, ?string $idempotencyKey = null): array
     {
-        $this->validateCreateParams($params);
+        $params = $this->validateCreateParams($params);
         $couponCode = null;
         if (is_string($params['coupon_code'] ?? null) && trim($params['coupon_code']) !== '') {
             $couponCode = $params['coupon_code'];
@@ -54,7 +54,7 @@ final class ChargeResource
             fn (array $response): array => $this->validatedChargeData(
                 $response,
                 $params['amount_cents'],
-                $couponCode !== null
+                $couponCode
             ),
             $couponCode === null ? null : fn (array $data): array => $this->validatedAmbiguousCouponData(
                 $data,
@@ -116,7 +116,11 @@ final class ChargeResource
      * @param array<string, mixed> $response
      * @return array<string, mixed>
      */
-    private function validatedChargeData(array $response, int $expectedAmount, bool $allowDiscount): array
+    private function validatedChargeData(
+        array $response,
+        int $expectedAmount,
+        ?string $expectedCouponCode
+    ): array
     {
         $data = $this->data($response);
         $id = $data['charge_id'] ?? $data['id'] ?? null;
@@ -130,10 +134,11 @@ final class ChargeResource
         if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor financeiro valido.');
         }
-        if (($allowDiscount && $amount > $expectedAmount)
-            || (!$allowDiscount && $amount !== $expectedAmount)) {
+        if (($expectedCouponCode !== null && $amount > $expectedAmount)
+            || ($expectedCouponCode === null && $amount !== $expectedAmount)) {
             throw new \UnexpectedValueException('Resposta 2xx com valor financeiro divergente.');
         }
+        $this->validateCouponEvidence($data, $expectedAmount, $expectedCouponCode);
 
         $data['charge_id'] = $id;
         $data['amount_cents'] = $amount;
@@ -149,9 +154,29 @@ final class ChargeResource
         int $expectedAmount,
         string $expectedCouponCode
     ): array {
+        $hasEvidence = $this->validateCouponEvidence($data, $expectedAmount, $expectedCouponCode);
+        if (($data['amount_cents'] ?? null) === $expectedAmount) {
+            return $data;
+        }
+        if (!$hasEvidence) {
+            throw new \UnexpectedValueException(
+                'Resposta 2xx descontada nao correlaciona cupom apos tentativa ambigua.'
+            );
+        }
+
+        return $data;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function validateCouponEvidence(
+        array $data,
+        int $expectedAmount,
+        ?string $expectedCouponCode
+    ): bool {
         $hasEvidence = false;
         if (array_key_exists('coupon_code', $data)) {
-            if (!is_string($data['coupon_code'])
+            if ($expectedCouponCode === null
+                || !is_string($data['coupon_code'])
                 || !hash_equals($expectedCouponCode, $data['coupon_code'])) {
                 throw new \UnexpectedValueException('Resposta 2xx diverge do coupon_code solicitado.');
             }
@@ -166,22 +191,14 @@ final class ChargeResource
             }
             $hasEvidence = true;
         }
-        if (($data['amount_cents'] ?? null) === $expectedAmount) {
-            return $data;
-        }
-        if (!$hasEvidence) {
-            throw new \UnexpectedValueException(
-                'Resposta 2xx descontada nao correlaciona cupom apos tentativa ambigua.'
-            );
-        }
-
-        return $data;
+        return $hasEvidence;
     }
 
     /**
      * @param array<string, mixed> $params
+     * @return array<string, mixed>
      */
-    private function validateCreateParams(array $params): void
+    private function validateCreateParams(array $params): array
     {
         $allowed = [
             'amount_cents',
@@ -208,8 +225,10 @@ final class ChargeResource
         if (array_diff(array_keys($params), $allowed) !== []) {
             throw new \InvalidArgumentException('Charge contém campos desconhecidos.');
         }
+        if (array_key_exists('metadata', $params)) {
+            $params['metadata'] = $this->validatedMetadataSnapshot($params['metadata']);
+        }
         $this->rejectSensitiveFields($params);
-        $this->rejectPanValues($params['metadata'] ?? null);
         if (!is_int($params['amount_cents'] ?? null)
             || $params['amount_cents'] < 100
             || $params['amount_cents'] > self::MAX_MONEY_CENTS) {
@@ -267,6 +286,7 @@ final class ChargeResource
             array_key_exists('split_rules', $params) ? $params['split_rules'] : [],
             $params['amount_cents']
         );
+        return $params;
     }
 
     /**
@@ -498,7 +518,11 @@ final class ChargeResource
         }
         foreach ($value as $key => $child) {
             $compact = preg_replace('/[^a-z0-9]/', '', strtolower((string) $key));
-            $sensitiveBase = rtrim($compact, '0123456789');
+            $sensitiveBase = (string) preg_replace(
+                '/(cvv|cvc)[0-9]+/',
+                '$1',
+                rtrim($compact, '0123456789')
+            );
             if (in_array($compact, ['pan', 'cardnumber'], true)
                 || str_ends_with($sensitiveBase, 'cvv')
                 || str_ends_with($sensitiveBase, 'cvc')
@@ -517,7 +541,7 @@ final class ChargeResource
         }
     }
 
-    private function rejectPanValues(mixed $value): void
+    private function validatedMetadataSnapshot(mixed $value): mixed
     {
         try {
             $encoded = json_encode($value, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
@@ -533,6 +557,7 @@ final class ChargeResource
 
         $this->rejectSensitiveFields($decoded);
         $this->rejectDecodedPanValues($decoded);
+        return $decoded;
     }
 
     private function rejectDecodedPanValues(mixed $value, int $depth = 0): void
