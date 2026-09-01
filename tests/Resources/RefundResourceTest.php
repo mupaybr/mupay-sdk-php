@@ -183,6 +183,35 @@ final class RefundResourceTest extends TestCase
         $resource->create('', [], 'idem_refund_1');
     }
 
+    /** @dataProvider dotSegmentProvider */
+    public function testFinancialPathsRejectDotSegmentIdentifiersBeforeNetwork(string $id): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        foreach ([
+            static fn (): array => $resource->create($id, ['full' => true], 'idem_dot_refund'),
+            static fn (): array => $resource->get($id),
+            static fn (): array => $resource->listByCharge($id),
+        ] as $operation) {
+            try {
+                $operation();
+                self::fail('Dot-segment identifier reached a financial path.');
+            } catch (\InvalidArgumentException) {
+            }
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
+    public static function dotSegmentProvider(): iterable
+    {
+        yield 'single dot' => ['.'];
+        yield 'double dot' => ['..'];
+    }
+
     public function testCreateRequiresExactlyOneExplicitRefundIntent(): void
     {
         $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', new FakeHttpClient([])));

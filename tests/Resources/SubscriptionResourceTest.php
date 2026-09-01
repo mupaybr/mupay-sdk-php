@@ -214,6 +214,8 @@ final class SubscriptionResourceTest extends TestCase
 
     public static function nonCanonicalSubscriptionIdProvider(): iterable
     {
+        yield 'single dot' => ['.'];
+        yield 'double dot' => ['..'];
         yield 'colon' => ['sub:123'];
         yield 'slash' => ['sub/123'];
         yield 'at sign' => ['sub@123'];

@@ -133,8 +133,8 @@ final class ChargeResourceTest extends TestCase
     public function testAllReturnsIteratorAcrossPages(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[{"charge_id":"ch_1"}],"next_cursor":"page_2"}'),
-            new Response(200, [], '{"data":[{"charge_id":"ch_2"}]}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_1","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:00Z"}],"next_cursor":"page_2"}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_2","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:01Z"}]}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
@@ -152,8 +152,8 @@ final class ChargeResourceTest extends TestCase
     public function testAllRejectsRepeatedCursorBeforeYieldingDuplicatedPage(): void
     {
         $http = new FakeHttpClient([
-            new Response(200, [], '{"data":[{"charge_id":"ch_1"}],"meta":{"next_cursor":"same"}}'),
-            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate"}],"meta":{"next_cursor":"same"}}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_1","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:00Z"}],"meta":{"next_cursor":"same"}}'),
+            new Response(200, [], '{"data":[{"charge_id":"ch_duplicate","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:01Z"}],"meta":{"next_cursor":"same"}}'),
         ]);
         $resource = new ChargeResource(new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none()));
 
@@ -242,10 +242,80 @@ final class ChargeResourceTest extends TestCase
 
     public static function terminalPaginationCursorProvider(): iterable
     {
-        yield 'root null' => ['{"data":[{"charge_id":"ch_terminal"}],"next_cursor":null}'];
-        yield 'root empty string' => ['{"data":[{"charge_id":"ch_terminal"}],"next_cursor":""}'];
-        yield 'meta null' => ['{"data":[{"charge_id":"ch_terminal"}],"meta":{"next_cursor":null}}'];
-        yield 'meta empty string' => ['{"data":[{"charge_id":"ch_terminal"}],"meta":{"next_cursor":""}}'];
+        $item = '{"charge_id":"ch_terminal","status":"pending","amount_cents":100,"created_at":"2026-08-31T12:00:00Z"}';
+        yield 'root null' => ['{"data":[' . $item . '],"next_cursor":null}'];
+        yield 'root empty string' => ['{"data":[' . $item . '],"next_cursor":""}'];
+        yield 'meta null' => ['{"data":[' . $item . '],"meta":{"next_cursor":null}}'];
+        yield 'meta empty string' => ['{"data":[' . $item . '],"meta":{"next_cursor":""}}'];
+    }
+
+    /** @dataProvider invalidChargePageProvider */
+    public function testAllRejectsMalformedOrFilterDivergentPageBeforeYielding(
+        string $responseBody,
+        array $params
+    ): void {
+        $http = new FakeHttpClient([new Response(200, [], $responseBody)]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        try {
+            iterator_to_array($resource->all($params), false);
+        } catch (\RuntimeException) {
+            self::assertCount(1, $http->requests());
+            return;
+        }
+
+        self::fail('Malformed or filter-divergent charge page was accepted.');
+    }
+
+    public static function invalidChargePageProvider(): iterable
+    {
+        $valid = [
+            'charge_id' => 'ch_1',
+            'status' => 'paid',
+            'amount_cents' => 100,
+            'created_at' => '2026-08-31T12:00:00Z',
+        ];
+
+        yield 'missing data' => ['{}', []];
+        yield 'object data' => [json_encode(['data' => ['charge_id' => 'ch_1']], JSON_THROW_ON_ERROR), []];
+        yield 'scalar item' => [json_encode(['data' => [123]], JSON_THROW_ON_ERROR), []];
+        yield 'missing economic field' => [
+            json_encode(['data' => [array_diff_key($valid, ['amount_cents' => true])]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'status outside filter' => [
+            json_encode(['data' => [$valid]], JSON_THROW_ON_ERROR),
+            ['status' => 'pending'],
+        ];
+        yield 'before lower bound' => [
+            json_encode(['data' => [[...$valid, 'created_at' => '2026-08-31T11:59:59Z']]], JSON_THROW_ON_ERROR),
+            ['created_at_from' => '2026-08-31T12:00:00Z'],
+        ];
+        yield 'at exclusive upper bound' => [
+            json_encode(['data' => [[...$valid, 'created_at' => '2026-08-31T13:00:00Z']]], JSON_THROW_ON_ERROR),
+            ['created_at_to' => '2026-08-31T13:00:00Z'],
+        ];
+    }
+
+    public function testAllAcceptsChargeInsideRequestedStatusAndWindow(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":[{"charge_id":"ch_paid","status":"paid","amount_cents":100,"created_at":"2026-08-31T12:30:00Z"}]}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $charges = iterator_to_array($resource->all([
+            'status' => 'paid',
+            'created_at_from' => '2026-08-31T12:00:00Z',
+            'created_at_to' => '2026-08-31T13:00:00Z',
+        ]), false);
+
+        self::assertSame(['ch_paid'], array_column($charges, 'charge_id'));
+        self::assertCount(1, $http->requests());
     }
 
     public function testCreateRejectsPanCvvAndUnknownFieldsBeforeNetwork(): void
@@ -432,6 +502,104 @@ final class ChargeResourceTest extends TestCase
         }
     }
 
+    /** @dataProvider invalidSplitRulesProvider */
+    public function testCreateRejectsMalformedOrOverallocatedSplitRulesBeforeNetwork(mixed $splitRules): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->create($this->validPixChargePayload(1_000) + ['split_rules' => $splitRules], 'idem_split');
+        } catch (\InvalidArgumentException) {
+            self::assertCount(0, $http->requests());
+            return;
+        }
+
+        self::fail('Malformed or overallocated split_rules were accepted.');
+    }
+
+    public static function invalidSplitRulesProvider(): iterable
+    {
+        $fixed = static fn (int $cents): array => [
+            'recipient_id' => 'recipient_1',
+            'value_type' => 'fixed_amount',
+            'value_cents' => $cents,
+        ];
+        $percentage = static fn (int $bps): array => [
+            'recipient_id' => 'recipient_1',
+            'value_type' => 'percentage_of_gross',
+            'value_bps' => $bps,
+        ];
+
+        yield 'null rules' => [null];
+        yield 'boolean rules' => [false];
+        yield 'not a list' => [['recipient_id' => 'recipient_1']];
+        yield 'scalar rule' => [[123]];
+        yield 'more than 50' => [array_fill(0, 51, $fixed(1))];
+        yield 'unknown field' => [[...$fixed(1), 'internal' => true]];
+        yield 'dot recipient' => [[...$fixed(1), 'recipient_id' => '..']];
+        yield 'fixed aggregate' => [[$fixed(600), $fixed(600)]];
+        yield 'percentage aggregate' => [[$percentage(6_000), $percentage(5_000)]];
+        yield 'mixed aggregate' => [[$fixed(600), $percentage(5_000)]];
+    }
+
+    public function testCreateAcceptsExactSplitBoundaryWithOverflowSafeMaximum(): void
+    {
+        $amount = 9_000_000_000_000_000;
+        $http = new FakeHttpClient([
+            new Response(201, [], json_encode([
+                'data' => [
+                    'charge_id' => 'ch_split_max',
+                    'status' => 'pending',
+                    'amount_cents' => $amount,
+                ],
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $charge = $resource->create($this->validPixChargePayload($amount) + [
+            'split_rules' => [[
+                'recipient_id' => 'recipient_1',
+                'value_type' => 'percentage_of_gross',
+                'value_bps' => 10_000,
+            ]],
+        ], 'idem_split_max');
+
+        self::assertSame($amount, $charge['amount_cents']);
+        self::assertCount(1, $http->requests());
+    }
+
+    public function testCreateAcceptsExactMixedSplitBoundary(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"data":{"charge_id":"ch_split_mixed","status":"pending","amount_cents":1000}}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $resource->create($this->validPixChargePayload(1_000) + [
+            'split_rules' => [
+                [
+                    'recipient_id' => 'recipient_fixed',
+                    'value_type' => 'fixed_amount',
+                    'value_cents' => 500,
+                ],
+                [
+                    'recipient_id' => 'recipient_percentage',
+                    'value_type' => 'percentage_of_gross',
+                    'value_bps' => 5_000,
+                ],
+            ],
+        ], 'idem_split_mixed');
+
+        self::assertCount(1, $http->requests());
+    }
+
     /** @dataProvider validCardTokenProvider */
     public function testCreateCardAcceptsExactlyOneValidTokenField(string $field, string $value): void
     {
@@ -595,5 +763,20 @@ final class ChargeResourceTest extends TestCase
         yield 'time without seconds' => ['2026-08-31T12:00Z'];
         yield 'invalid calendar date' => ['2026-02-30T12:00:00Z'];
         yield 'invalid offset' => ['2026-08-31T12:00:00+24:00'];
+    }
+
+    /** @return array<string, mixed> */
+    private function validPixChargePayload(int $amountCents): array
+    {
+        return [
+            'amount_cents' => $amountCents,
+            'payment_method' => 'pix',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+        ];
     }
 }

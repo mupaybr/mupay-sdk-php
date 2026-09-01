@@ -56,7 +56,12 @@ final class ChargeResource
     public function all(array $params = []): PageIterator
     {
         $this->validateListParams($params);
-        return new PageIterator($this->client, '/v1/charges', $params);
+        return new PageIterator(
+            $this->client,
+            '/v1/charges',
+            $params,
+            fn (array $item): array => $this->validatedListCharge($item, $params)
+        );
     }
 
     /**
@@ -202,6 +207,113 @@ final class ChargeResource
                 || array_key_exists('save_card', $params))) {
             throw new \InvalidArgumentException('PIX não aceita campos de cartão.');
         }
+        $this->validateSplitRules(
+            array_key_exists('split_rules', $params) ? $params['split_rules'] : [],
+            $params['amount_cents']
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $filters
+     * @return array<string, mixed>
+     */
+    private function validatedListCharge(array $data, array $filters): array
+    {
+        $id = $data['charge_id'] ?? $data['id'] ?? null;
+        $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
+        if (!is_string($id) || !$this->validResourceId($id)) {
+            throw new \UnexpectedValueException('Listagem retornou charge_id invalido.');
+        }
+        if (!is_string($data['status'] ?? null)
+            || !in_array($data['status'], self::ALLOWED_STATUSES, true)) {
+            throw new \UnexpectedValueException('Listagem retornou status de charge invalido.');
+        }
+        if (!is_int($amount) || $amount < 100 || $amount > self::MAX_MONEY_CENTS) {
+            throw new \UnexpectedValueException('Listagem retornou valor de charge invalido.');
+        }
+        try {
+            $createdAt = $this->timestamp($data['created_at'] ?? null, 'created_at');
+        } catch (\InvalidArgumentException $exception) {
+            throw new \UnexpectedValueException('Listagem retornou created_at invalido.', previous: $exception);
+        }
+        if ($createdAt === null) {
+            throw new \UnexpectedValueException('Listagem retornou charge sem created_at.');
+        }
+        if (isset($filters['status']) && $data['status'] !== $filters['status']) {
+            throw new \UnexpectedValueException('Listagem retornou charge fora do status solicitado.');
+        }
+        $from = $this->timestamp($filters['created_at_from'] ?? null, 'created_at_from');
+        if ($from !== null && $this->compareTimestamps($createdAt, $from) < 0) {
+            throw new \UnexpectedValueException('Listagem retornou charge anterior a created_at_from.');
+        }
+        $to = $this->timestamp($filters['created_at_to'] ?? null, 'created_at_to');
+        if ($to !== null && $this->compareTimestamps($createdAt, $to) >= 0) {
+            throw new \UnexpectedValueException('Listagem retornou charge em ou apos created_at_to.');
+        }
+
+        $data['charge_id'] = $id;
+        $data['amount_cents'] = $amount;
+        return $data;
+    }
+
+    /**
+     * @param mixed $rules
+     */
+    private function validateSplitRules(mixed $rules, int $amountCents): void
+    {
+        if (!is_array($rules) || !array_is_list($rules) || count($rules) > 50) {
+            throw new \InvalidArgumentException('split_rules deve ser uma lista com no máximo 50 regras.');
+        }
+        $allocatedCents = 0;
+        $totalBps = 0;
+        foreach ($rules as $rule) {
+            if (!is_array($rule)
+                || array_diff(array_keys($rule), ['recipient_id', 'value_type', 'value_bps', 'value_cents']) !== []
+                || !is_string($rule['recipient_id'] ?? null)
+                || !$this->validResourceId($rule['recipient_id'])) {
+                throw new \InvalidArgumentException('Regra de split invalida.');
+            }
+            $ruleCents = 0;
+            if (($rule['value_type'] ?? null) === 'fixed_amount') {
+                if (array_diff(array_keys($rule), ['recipient_id', 'value_type', 'value_cents']) !== []
+                    || !is_int($rule['value_cents'] ?? null)
+                    || $rule['value_cents'] < 1
+                    || $rule['value_cents'] > $amountCents) {
+                    throw new \InvalidArgumentException('Split fixed_amount exige somente value_cents valido.');
+                }
+                $ruleCents = $rule['value_cents'];
+            } elseif (($rule['value_type'] ?? null) === 'percentage_of_gross') {
+                if (array_diff(array_keys($rule), ['recipient_id', 'value_type', 'value_bps']) !== []
+                    || !is_int($rule['value_bps'] ?? null)
+                    || $rule['value_bps'] < 1
+                    || $rule['value_bps'] > 10_000
+                    || $totalBps > 10_000 - $rule['value_bps']) {
+                    throw new \InvalidArgumentException('Split percentual excede 100% ou possui value_bps invalido.');
+                }
+                $totalBps += $rule['value_bps'];
+                $ruleCents = $this->splitPercentageCents($amountCents, $rule['value_bps']);
+            } else {
+                throw new \InvalidArgumentException('value_type invalido em split_rules.');
+            }
+            if ($allocatedCents > $amountCents - $ruleCents) {
+                throw new \InvalidArgumentException('Agregado de split_rules excede o valor da cobrança.');
+            }
+            $allocatedCents += $ruleCents;
+        }
+    }
+
+    private function splitPercentageCents(int $amountCents, int $valueBps): int
+    {
+        return intdiv($amountCents, 10_000) * $valueBps
+            + intdiv(($amountCents % 10_000) * $valueBps, 10_000);
+    }
+
+    private function validResourceId(string $value): bool
+    {
+        return $value !== '.'
+            && $value !== '..'
+            && preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $value) === 1;
     }
 
     private function validateCustomer(mixed $customer): void

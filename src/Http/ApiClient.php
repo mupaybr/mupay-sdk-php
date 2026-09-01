@@ -349,7 +349,11 @@ final class ApiClient
             || $status >= 500
             || ($status === 409
                 && ($responseCode === null
-                    || in_array($responseCode, ['idempotency_in_progress', 'idempotency_outcome_unknown'], true)));
+                    || in_array(
+                        $responseCode,
+                        ['http_409', 'idempotency_in_progress', 'idempotency_outcome_unknown'],
+                        true
+                    )));
     }
 
     private function responseExceptionSnapshot(ResponseInterface $response): ApiException
@@ -502,11 +506,13 @@ final class ApiClient
 
     private function stringValue(mixed $value): ?string
     {
-        if (!is_string($value) || $value === '') {
+        if (!is_string($value)) {
             return null;
         }
 
-        return substr((string) preg_replace('/[\x00-\x1F\x7F]/', ' ', $value), 0, 1024);
+        $sanitized = trim(substr((string) preg_replace('/[\x00-\x1F\x7F]/', ' ', $value), 0, 1024));
+
+        return $sanitized === '' ? null : $sanitized;
     }
 
     private function validateIdempotencyKey(mixed $key): void

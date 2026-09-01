@@ -198,7 +198,9 @@ final class RefundResource
 
     private function validateResourceId(string $value, string $field): void
     {
-        if (preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $value) !== 1) {
+        if ($value === '.'
+            || $value === '..'
+            || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $value) !== 1) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
     }

@@ -14,7 +14,8 @@ final class PageIterator implements \IteratorAggregate
     public function __construct(
         private readonly ApiClient $client,
         private readonly string $path,
-        private readonly array $params = []
+        private readonly array $params = [],
+        private readonly ?\Closure $itemValidator = null
     ) {
     }
 
@@ -43,7 +44,16 @@ final class PageIterator implements \IteratorAggregate
                 throw new \RuntimeException('Paginacao excedeu o limite seguro de 1000 paginas.');
             }
             $response = $this->client->get($this->path, $params);
-            $cursor = $response['next_cursor'] ?? $response['meta']['next_cursor'] ?? null;
+            if (array_key_exists('next_cursor', $response)) {
+                $cursor = $response['next_cursor'];
+            } elseif (array_key_exists('meta', $response)) {
+                if (!is_array($response['meta'])) {
+                    throw new \RuntimeException('API retornou metadados invalidos durante paginacao.');
+                }
+                $cursor = $response['meta']['next_cursor'] ?? null;
+            } else {
+                $cursor = null;
+            }
             if ($cursor !== null && !is_string($cursor)) {
                 throw new \RuntimeException('API retornou cursor invalido durante paginacao.');
             }
@@ -57,14 +67,22 @@ final class PageIterator implements \IteratorAggregate
                 $seenCursors[$cursor] = true;
             }
 
-            $items = $response['data'] ?? [];
-
-            if (is_array($items)) {
-                foreach ($items as $item) {
-                    if (is_array($item)) {
-                        yield $item;
-                    }
+            if (!array_key_exists('data', $response)
+                || !is_array($response['data'])
+                || !array_is_list($response['data'])) {
+                throw new \RuntimeException('API retornou pagina de dados invalida.');
+            }
+            $items = [];
+            foreach ($response['data'] as $item) {
+                if (!is_array($item)) {
+                    throw new \RuntimeException('API retornou item de pagina invalido.');
                 }
+                $items[] = $this->itemValidator === null
+                    ? $item
+                    : ($this->itemValidator)($item);
+            }
+            foreach ($items as $item) {
+                yield $item;
             }
 
             if (is_string($cursor) && $cursor !== '') {

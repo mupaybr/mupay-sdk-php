@@ -199,6 +199,10 @@ final class OutcomeUnknownTest extends TestCase
         return [
             'empty-body' => ['', 'empty-conflict-key'],
             'malformed-json' => ['{invalid', 'malformed-conflict-key'],
+            'missing-code' => ['{}', 'missing-code-conflict-key'],
+            'empty-code' => ['{"code":""}', 'empty-code-conflict-key'],
+            'whitespace-code' => ['{"code":"   "}', 'whitespace-code-conflict-key'],
+            'fallback-code' => ['{"code":"http_409"}', 'fallback-code-conflict-key'],
         ];
     }
 
