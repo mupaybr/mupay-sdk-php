@@ -666,6 +666,8 @@ final class ChargeResourceTest extends TestCase
 		yield 'prefixed CVV key' => [['cardCvv' => '123']];
 		yield 'prefixed CSC key' => [['cardCsc' => '123']];
 		yield 'prefixed CID key' => [['cardCid' => '1234']];
+		yield 'Amex CID key' => [['amexCid' => '1234']];
+		yield 'American Express CID key' => [['americanExpressCid' => '1234']];
 		yield 'prefixed security code key' => [['card_security_code' => '123']];
 		yield 'security value key' => [['cardSecurityValue' => '123']];
 		yield 'security number key' => [['cardSecurityNumber' => '123']];
