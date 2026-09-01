@@ -489,6 +489,14 @@ final class ChargeResourceTest extends TestCase
             json_encode(['data' => [[...$valid, 'amount_cents' => 0]]], JSON_THROW_ON_ERROR),
             [],
         ];
+        yield 'conflicting charge id aliases' => [
+            json_encode(['data' => [[...$valid, 'id' => 'ch_other']]], JSON_THROW_ON_ERROR),
+            [],
+        ];
+        yield 'conflicting amount aliases' => [
+            json_encode(['data' => [[...$valid, 'amount' => 101]]], JSON_THROW_ON_ERROR),
+            [],
+        ];
         yield 'status outside filter' => [
             json_encode(['data' => [$valid]], JSON_THROW_ON_ERROR),
             ['status' => 'pending'],
@@ -1103,6 +1111,67 @@ final class ChargeResourceTest extends TestCase
                 self::fail('Divergent customer echo confirmed an ambiguous mutation.');
             } catch (OutcomeUnknownException $exception) {
                 self::assertSame('idem_customer_' . $index, $exception->idempotencyKey());
+                self::assertCount(2, $http->requests());
+            }
+        }
+    }
+
+    public function testCreateRejectsConflictingLegacyAliases(): void
+    {
+        foreach ([
+            ['id' => 'ch_other'],
+            ['amount' => 9901],
+        ] as $index => $legacyAlias) {
+            $response = [
+                'data' => [
+                    'charge_id' => 'ch_alias',
+                    'status' => 'pending',
+                    'amount_cents' => 9900,
+                    ...$legacyAlias,
+                ],
+            ];
+            $http = new FakeHttpClient([
+                new Response(200, [], json_encode($response, JSON_THROW_ON_ERROR)),
+            ]);
+            $resource = new ChargeResource(
+                new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+            );
+
+            try {
+                $resource->create($this->validPixChargePayload(9900), 'idem_alias_' . $index);
+                self::fail('Conflicting legacy alias confirmed a mutation.');
+            } catch (OutcomeUnknownException $exception) {
+                self::assertSame('idem_alias_' . $index, $exception->idempotencyKey());
+            }
+        }
+    }
+
+    public function testCreateKeepsOutcomeUnknownForDivergentExternalReferenceAfterAmbiguousRetry(): void
+    {
+        foreach (['other-reference', null] as $index => $externalReference) {
+            $response = [
+                'data' => [
+                    'charge_id' => 'ch_external_' . $index,
+                    'status' => 'pending',
+                    'amount_cents' => 9900,
+                    'external_reference' => $externalReference,
+                ],
+            ];
+            $http = new FakeHttpClient([
+                new NetworkFailure('Response lost after request dispatch'),
+                new Response(200, [], json_encode($response, JSON_THROW_ON_ERROR)),
+            ]);
+            $resource = new ChargeResource(
+                new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry())
+            );
+            $payload = $this->validPixChargePayload(9900);
+            $payload['external_reference'] = 'expected-reference';
+
+            try {
+                $resource->create($payload, 'idem_external_' . $index);
+                self::fail('Divergent external reference confirmed an ambiguous mutation.');
+            } catch (OutcomeUnknownException $exception) {
+                self::assertSame('idem_external_' . $index, $exception->idempotencyKey());
                 self::assertCount(2, $http->requests());
             }
         }

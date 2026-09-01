@@ -50,6 +50,9 @@ final class ChargeResource
         $customerId = is_string($params['customer']['id'] ?? null)
             ? $params['customer']['id']
             : null;
+        $externalReference = is_string($params['external_reference'] ?? null)
+            ? $params['external_reference']
+            : null;
         return $this->client->post(
             '/v1/charges',
             $params,
@@ -59,7 +62,8 @@ final class ChargeResource
                 $params['payment_method'],
                 $params['amount_cents'],
                 $couponCode,
-                $customerId
+                $customerId,
+                $externalReference
             ),
             $couponCode === null ? null : fn (array $data): array => $this->validatedAmbiguousCouponData(
                 $data,
@@ -126,12 +130,13 @@ final class ChargeResource
         string $expectedPaymentMethod,
         int $expectedAmount,
         ?string $expectedCouponCode,
-        ?string $expectedCustomerId
+        ?string $expectedCustomerId,
+        ?string $expectedExternalReference
     ): array
     {
         $data = $this->data($response);
-        $id = $data['charge_id'] ?? $data['id'] ?? null;
-        $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
+        $id = $this->aliasedValue($data, 'charge_id', 'id');
+        $amount = $this->aliasedValue($data, 'amount_cents', 'amount');
         if (!is_string($id) || !$this->validResourceId($id)) {
             throw new \UnexpectedValueException('Resposta 2xx sem charge_id valido.');
         }
@@ -151,6 +156,12 @@ final class ChargeResource
             $expectedCustomerId,
             'Resposta 2xx diverge do customer solicitado.'
         );
+        if ($expectedExternalReference !== null
+            && array_key_exists('external_reference', $data)
+            && (!is_string($data['external_reference'])
+                || !hash_equals($expectedExternalReference, $data['external_reference']))) {
+            throw new \UnexpectedValueException('Resposta 2xx diverge da external_reference solicitada.');
+        }
         if (($expectedCouponCode !== null && $amount > $expectedAmount)
             || ($expectedCouponCode === null && $amount !== $expectedAmount)) {
             throw new \UnexpectedValueException('Resposta 2xx com valor financeiro divergente.');
@@ -231,6 +242,23 @@ final class ChargeResource
                 throw new \UnexpectedValueException($message);
             }
         }
+    }
+
+    /** @param array<string, mixed> $data */
+    private function aliasedValue(array $data, string $primary, string $legacy): mixed
+    {
+        $hasPrimary = array_key_exists($primary, $data);
+        $hasLegacy = array_key_exists($legacy, $data);
+        if ($hasPrimary
+            && $hasLegacy
+            && $data[$primary] !== null
+            && $data[$legacy] !== null
+            && $data[$primary] !== $data[$legacy]) {
+            throw new \UnexpectedValueException('Resposta contem aliases conflitantes.');
+        }
+        return $hasPrimary && $data[$primary] !== null
+            ? $data[$primary]
+            : ($hasLegacy ? $data[$legacy] : null);
     }
 
     /**
@@ -354,8 +382,8 @@ final class ChargeResource
      */
     private function validatedListCharge(array $data, array $filters): array
     {
-        $id = $data['charge_id'] ?? $data['id'] ?? null;
-        $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
+        $id = $this->aliasedValue($data, 'charge_id', 'id');
+        $amount = $this->aliasedValue($data, 'amount_cents', 'amount');
         if (!is_string($id) || !$this->validResourceId($id)) {
             throw new \UnexpectedValueException('Listagem retornou charge_id invalido.');
         }
