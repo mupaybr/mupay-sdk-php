@@ -137,7 +137,6 @@ final class ChargeResource
             throw new \UnexpectedValueException('Resposta 2xx sem valor financeiro valido.');
         }
         if (array_key_exists('payment_method', $data)
-            && $data['payment_method'] !== null
             && (!is_string($data['payment_method'])
                 || !hash_equals($expectedPaymentMethod, $data['payment_method']))) {
             throw new \UnexpectedValueException('Resposta 2xx diverge do payment_method solicitado.');
@@ -249,6 +248,17 @@ final class ChargeResource
             throw new \InvalidArgumentException('payment_method invalido.');
         }
         $this->validateCustomer($params['customer'] ?? null);
+        foreach (['description', 'external_reference', 'affiliate_code', 'coupon_code'] as $field) {
+            if (is_string($params[$field] ?? null) && $this->containsPanLikeSequence($params[$field])) {
+                throw new \InvalidArgumentException($field . ' nao pode conter PAN.');
+            }
+        }
+        foreach (['name', 'email'] as $field) {
+            if (is_string($params['customer'][$field] ?? null)
+                && $this->containsPanLikeSequence($params['customer'][$field])) {
+                throw new \InvalidArgumentException('customer.' . $field . ' nao pode conter PAN.');
+            }
+        }
         if (array_key_exists('soft_descriptor', $params)
             && $params['soft_descriptor'] !== null
             && (!is_string($params['soft_descriptor']) || $params['soft_descriptor'] !== '')) {
@@ -335,6 +345,12 @@ final class ChargeResource
         }
         if (isset($filters['status']) && $data['status'] !== $filters['status']) {
             throw new \UnexpectedValueException('Listagem retornou charge fora do status solicitado.');
+        }
+        if (isset($filters['payment_method'])
+            && array_key_exists('payment_method', $data)
+            && (!is_string($data['payment_method'])
+                || !hash_equals($filters['payment_method'], $data['payment_method']))) {
+            throw new \UnexpectedValueException('Listagem retornou charge fora do payment_method solicitado.');
         }
         $from = $this->timestamp($filters['created_at_from'] ?? null, 'created_at_from');
         if ($from !== null && $this->compareTimestamps($createdAt, $from) < 0) {
@@ -553,6 +569,7 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'cvcnumber')
                 || str_ends_with($sensitiveBase, 'securitycode')
                 || str_ends_with($sensitiveBase, 'securityvalue')
+                || str_ends_with($sensitiveBase, 'securitynumber')
                 || str_ends_with($sensitiveBase, 'verificationcode')
                 || str_ends_with($sensitiveBase, 'verificationvalue')
                 || str_ends_with($sensitiveBase, 'verificationnumber')

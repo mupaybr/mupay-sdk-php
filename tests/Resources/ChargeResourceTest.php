@@ -170,13 +170,19 @@ final class ChargeResourceTest extends TestCase
         self::assertCount(1, $http->requests());
     }
 
-    public function testCreateRejectsConflictingPaymentMethodEcho(): void
+    #[DataProvider('conflictingPaymentMethodEchoProvider')]
+    public function testCreateRejectsConflictingPaymentMethodEcho(mixed $paymentMethod): void
     {
         $http = new FakeHttpClient([
             new Response(
                 200,
                 [],
-                '{"data":{"charge_id":"ch_wrong_method","status":"pending","amount_cents":9900,"payment_method":"credit_card"}}'
+                json_encode(['data' => [
+                    'charge_id' => 'ch_wrong_method',
+                    'status' => 'pending',
+                    'amount_cents' => 9900,
+                    'payment_method' => $paymentMethod,
+                ]], JSON_THROW_ON_ERROR)
             ),
         ]);
         $resource = new ChargeResource(
@@ -191,6 +197,12 @@ final class ChargeResourceTest extends TestCase
             self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
             self::assertCount(1, $http->requests());
         }
+    }
+
+    public static function conflictingPaymentMethodEchoProvider(): iterable
+    {
+        yield 'different method' => ['credit_card'];
+        yield 'explicit null' => [null];
     }
 
     #[DataProvider('conflictingCouponFirstResponseProvider')]
@@ -481,6 +493,10 @@ final class ChargeResourceTest extends TestCase
             json_encode(['data' => [$valid]], JSON_THROW_ON_ERROR),
             ['status' => 'pending'],
         ];
+        yield 'payment method outside filter' => [
+            json_encode(['data' => [[...$valid, 'payment_method' => 'credit_card']]], JSON_THROW_ON_ERROR),
+            ['payment_method' => 'pix'],
+        ];
         yield 'before lower bound' => [
             json_encode(['data' => [[...$valid, 'created_at' => '2026-08-31T11:59:59Z']]], JSON_THROW_ON_ERROR),
             ['created_at_from' => '2026-08-31T12:00:00Z'],
@@ -651,6 +667,7 @@ final class ChargeResourceTest extends TestCase
 		yield 'prefixed CID key' => [['cardCid' => '1234']];
 		yield 'prefixed security code key' => [['card_security_code' => '123']];
 		yield 'security value key' => [['cardSecurityValue' => '123']];
+		yield 'security number key' => [['cardSecurityNumber' => '123']];
 		yield 'verification code key' => [['cardVerificationCode' => '123']];
 		yield 'verification value key' => [['card_verification_value' => '123']];
 		yield 'verification number key' => [['cardVerificationNumber' => '123']];
@@ -965,6 +982,32 @@ final class ChargeResourceTest extends TestCase
     {
         yield 'ephemeral token is a PAN' => ['card_token', '4111111111111111'];
         yield 'stored token id is a PAN' => ['card_token_id', '4111111111111111'];
+    }
+
+    #[DataProvider('panLikeFreeTextProvider')]
+    public function testCreateRejectsPanLikeFreeTextBeforeNetwork(string $field): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload[$field] = 'reference 4111-1111-1111-1111';
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_pan_text');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function panLikeFreeTextProvider(): iterable
+    {
+        yield 'description' => ['description'];
+        yield 'external reference' => ['external_reference'];
+        yield 'affiliate code' => ['affiliate_code'];
+        yield 'coupon code' => ['coupon_code'];
     }
 
     #[DataProvider('nonOneInstallmentValueProvider')]

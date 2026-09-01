@@ -115,6 +115,7 @@ final class RefundResource
         }
         if (array_key_exists('next_cursor', $response)
             && $response['next_cursor'] !== null
+            && $response['next_cursor'] !== ''
             && !CursorValidator::isCanonicalBase64Url($response['next_cursor'])) {
             throw new \UnexpectedValueException('Cursor de refunds invalido na resposta.');
         }

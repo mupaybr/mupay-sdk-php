@@ -420,6 +420,7 @@ final class RefundResourceTest extends TestCase
     {
         yield 'missing' => [[]];
         yield 'null' => [['next_cursor' => null]];
+        yield 'empty string' => [['next_cursor' => '']];
     }
 
     #[DataProvider('invalidRefundCursorProvider')]
@@ -446,7 +447,6 @@ final class RefundResourceTest extends TestCase
         yield 'space' => ['bad cursor'];
         yield 'non-canonical trailing bits' => ['Zh'];
         yield 'padded base64url' => ['Zg=='];
-        yield 'empty string' => [''];
     }
 
     #[DataProvider('refundPageLimitProvider')]
