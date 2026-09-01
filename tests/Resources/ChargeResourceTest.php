@@ -1268,6 +1268,29 @@ final class ChargeResourceTest extends TestCase
         yield 'mixed aggregate' => [[$fixed(600), $percentage(5_000)]];
     }
 
+    public function testCreateRejectsPanRecipientBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(1_000) + [
+            'split_rules' => [[
+                'recipient_id' => '4111111111111111',
+                'value_type' => 'fixed_amount',
+                'value_cents' => 1,
+            ]],
+        ];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('PAN');
+        try {
+            $resource->create($payload, 'idem_split_pan');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
     public function testCreateAcceptsExactSplitBoundaryWithOverflowSafeMaximum(): void
     {
         $amount = 9_000_000_000_000_000;
@@ -1286,7 +1309,7 @@ final class ChargeResourceTest extends TestCase
 
         $charge = $resource->create($this->validPixChargePayload($amount) + [
             'split_rules' => [[
-                'recipient_id' => 'recipient_1',
+                'recipient_id' => '8777777777771013',
                 'value_type' => 'percentage_of_gross',
                 'value_bps' => 10_000,
             ]],

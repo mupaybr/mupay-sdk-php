@@ -447,6 +447,9 @@ final class ChargeResource
                 || !$this->validResourceId($rule['recipient_id'])) {
                 throw new \InvalidArgumentException('Regra de split invalida.');
             }
+            if ($this->containsPanLikeSequence($rule['recipient_id'])) {
+                throw new \InvalidArgumentException('recipient_id de split nao pode conter PAN.');
+            }
             $ruleCents = 0;
             if (($rule['value_type'] ?? null) === 'fixed_amount') {
                 if (array_diff(array_keys($rule), ['recipient_id', 'value_type', 'value_cents']) !== []
