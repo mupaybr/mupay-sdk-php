@@ -175,12 +175,14 @@ final class ChargeResource
     ): bool {
         $hasEvidence = false;
         if (array_key_exists('coupon_code', $data)) {
-            if ($expectedCouponCode === null
-                || !is_string($data['coupon_code'])
-                || !hash_equals($expectedCouponCode, $data['coupon_code'])) {
+            $actualCouponCode = $data['coupon_code'];
+            if (($expectedCouponCode === null && $actualCouponCode !== null)
+                || ($expectedCouponCode !== null
+                    && (!is_string($actualCouponCode)
+                        || !hash_equals($expectedCouponCode, $actualCouponCode)))) {
                 throw new \UnexpectedValueException('Resposta 2xx diverge do coupon_code solicitado.');
             }
-            $hasEvidence = true;
+            $hasEvidence = $expectedCouponCode !== null;
         }
         foreach (['original_amount_cents', 'amount_subtotal_cents'] as $field) {
             if (!array_key_exists($field, $data)) {
@@ -264,9 +266,15 @@ final class ChargeResource
                 && (!is_string($params['card_token']) || $params['card_token'] === '')) {
                 throw new \InvalidArgumentException('card_token invalido.');
             }
+            if ($hasCardToken && $this->containsPanLikeSequence($params['card_token'])) {
+                throw new \InvalidArgumentException('card_token nao pode conter PAN.');
+            }
             if ($hasCardTokenId
                 && (!is_string($params['card_token_id']) || $params['card_token_id'] === '')) {
                 throw new \InvalidArgumentException('card_token_id invalido.');
+            }
+            if ($hasCardTokenId && $this->containsPanLikeSequence($params['card_token_id'])) {
+                throw new \InvalidArgumentException('card_token_id nao pode conter PAN.');
             }
             if ($hasCardToken === $hasCardTokenId) {
                 throw new \InvalidArgumentException('credit_card exige exatamente um token do PSP.');
@@ -510,7 +518,9 @@ final class ChargeResource
 
     private function rejectSensitiveFields(mixed $value, int $depth = 0): void
     {
-        if (!is_array($value)) {
+        if (is_object($value)) {
+            $value = get_object_vars($value);
+        } elseif (!is_array($value)) {
             return;
         }
         if ($depth > self::MAX_INPUT_NESTING_DEPTH) {
@@ -534,7 +544,8 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'cvcnumber')
                 || str_ends_with($sensitiveBase, 'securitycode')
                 || str_ends_with($sensitiveBase, 'verificationcode')
-                || str_ends_with($sensitiveBase, 'verificationvalue')) {
+                || str_ends_with($sensitiveBase, 'verificationvalue')
+                || str_ends_with($sensitiveBase, 'verificationnumber')) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
             $this->rejectSensitiveFields($child, $depth + 1);
@@ -547,7 +558,7 @@ final class ChargeResource
             $encoded = json_encode($value, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
             $decoded = json_decode(
                 $encoded,
-                true,
+                false,
                 512,
                 JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING
             );
@@ -565,8 +576,8 @@ final class ChargeResource
         if ($depth > self::MAX_INPUT_NESTING_DEPTH) {
             throw new \InvalidArgumentException('Payload excede o limite de profundidade.');
         }
-        if (is_array($value)) {
-            foreach ($value as $child) {
+        if (is_array($value) || is_object($value)) {
+            foreach (is_object($value) ? get_object_vars($value) : $value as $child) {
                 $this->rejectDecodedPanValues($child, $depth + 1);
             }
             return;

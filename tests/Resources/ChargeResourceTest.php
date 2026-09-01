@@ -150,6 +150,26 @@ final class ChargeResourceTest extends TestCase
         self::assertCount(1, $http->requests());
     }
 
+    public function testCreateAcceptsNullCouponEchoWhenNoCouponWasRequested(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(
+                200,
+                [],
+                '{"data":{"charge_id":"ch_without_coupon","status":"pending","amount_cents":9900,"coupon_code":null}}'
+            ),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $charge = $resource->create($this->validPixChargePayload(9900), 'idem_without_coupon');
+
+        self::assertSame('ch_without_coupon', $charge['charge_id']);
+        self::assertNull($charge['coupon_code']);
+        self::assertCount(1, $http->requests());
+    }
+
     #[DataProvider('conflictingCouponFirstResponseProvider')]
     public function testCreateRejectsConflictingCouponEvidenceOnFirstResponse(string $responseBody): void
     {
@@ -607,6 +627,7 @@ final class ChargeResourceTest extends TestCase
 		yield 'prefixed security code key' => [['card_security_code' => '123']];
 		yield 'verification code key' => [['cardVerificationCode' => '123']];
 		yield 'verification value key' => [['card_verification_value' => '123']];
+		yield 'verification number key' => [['cardVerificationNumber' => '123']];
 		yield 'CVV value key' => [['cvv_value' => '123']];
 		yield 'CVC value key' => [['cvcValue' => '123']];
 		yield 'CVV code key' => [['cardCvvCode' => '123']];
@@ -676,6 +697,28 @@ final class ChargeResourceTest extends TestCase
         $sent = json_decode((string) $http->lastRequest()->getBody(), true, 512, JSON_THROW_ON_ERROR);
         self::assertSame(['stateful' => ['value' => 'safe']], $sent['metadata']);
         self::assertSame(1, $stateful->calls());
+    }
+
+    public function testCreatePreservesJsonObjectShapeInCanonicalMetadataSnapshot(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"charge_id":"charge_1","status":"pending","amount_cents":100}'),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = [
+            'empty_object' => (object) [],
+            'numeric_object' => (object) ['0' => 'safe'],
+        ];
+
+        $resource->create($payload, 'idem_object_metadata');
+
+        $sent = json_decode((string) $http->lastRequest()->getBody(), false, 512, JSON_THROW_ON_ERROR);
+        self::assertIsObject($sent->metadata->empty_object);
+        self::assertIsObject($sent->metadata->numeric_object);
+        self::assertSame('safe', $sent->metadata->numeric_object->{'0'});
     }
 
     public function testCreateAcceptsEquivalentNonLuhnMetadataValue(): void
@@ -854,6 +897,40 @@ final class ChargeResourceTest extends TestCase
             'card_token' => 'token_value',
             'card_token_id' => 'token_123',
         ]];
+    }
+
+    #[DataProvider('panLikeCardTokenProvider')]
+    public function testCreateCardRejectsPanLikeTokenBeforeNetwork(string $field, string $value): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = [
+            'amount_cents' => 9900,
+            'payment_method' => 'credit_card',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+            'payer_ip' => '203.0.113.10',
+            $field => $value,
+        ];
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $resource->create($payload, 'idem_pan_token');
+        } finally {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function panLikeCardTokenProvider(): iterable
+    {
+        yield 'ephemeral token is a PAN' => ['card_token', '4111111111111111'];
+        yield 'stored token id is a PAN' => ['card_token_id', '4111111111111111'];
     }
 
     #[DataProvider('nonOneInstallmentValueProvider')]
