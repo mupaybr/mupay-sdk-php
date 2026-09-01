@@ -50,9 +50,10 @@ final class RefundResourceTest extends TestCase
 
     public static function incompleteEconomicRefundResponseProvider(): iterable
     {
-        yield 'missing amount' => ['{"refund_id":"rf_123","status":"completed"}'];
-        yield 'missing status' => ['{"refund_id":"rf_123","amount_cents":500}'];
-        yield 'unknown status' => ['{"refund_id":"rf_123","amount_cents":500,"status":"mystery"}'];
+        yield 'missing charge ID' => ['{"refund_id":"rf_123","amount_cents":500,"status":"completed"}'];
+        yield 'missing amount' => ['{"refund_id":"rf_123","charge_id":"ch_123","status":"completed"}'];
+        yield 'missing status' => ['{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500}'];
+        yield 'unknown status' => ['{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"mystery"}'];
     }
 
     public function testCreateNormalizesLegacyResponseIdToRefundId(): void
@@ -124,6 +125,25 @@ final class RefundResourceTest extends TestCase
         yield 'legacy amount' => [
             '{"data":{"refund_id":"rf_123","charge_id":"ch_123","amount":501,"status":"completed"}}',
         ];
+    }
+
+    public function testCreateTreatsMismatchedChargeIdAsOutcomeUnknown(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(201, [], '{"data":{"refund_id":"rf_123","charge_id":"ch_other","amount_cents":500,"status":"completed"}}'),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->create('ch_123', ['amount_cents' => 500], 'idem_refund_charge_mismatch');
+            self::fail('Mismatched refund charge confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_refund_charge_mismatch', $exception->idempotencyKey());
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
     }
 
     /** @dataProvider documentedRefundStatusProvider */
@@ -222,6 +242,117 @@ final class RefundResourceTest extends TestCase
         self::assertSame('cursor_2', $page['next_cursor']);
         self::assertSame('/v1/refunds/rf_123', $http->requests()[0]->getUri()->getPath());
         self::assertSame('limit=25&cursor=cursor_1', $http->requests()[1]->getUri()->getQuery());
+    }
+
+    public function testGetNormalizesLegacyFieldsAndCorrelatesRequestedRefundId(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"id":"rf_123","charge_id":"ch_123","amount":750,"status":"completed"}}'),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $refund = $resource->get('rf_123');
+
+        self::assertSame('rf_123', $refund['refund_id']);
+        self::assertSame(750, $refund['amount_cents']);
+        self::assertSame('rf_123', $refund['id']);
+        self::assertSame(750, $refund['amount']);
+    }
+
+    #[DataProvider('invalidGetRefundResponseProvider')]
+    public function testGetRejectsInvalidOrUncorrelatedRefundResponse(array $response): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode($response, JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $this->expectException(\UnexpectedValueException::class);
+        $resource->get('rf_123');
+    }
+
+    public static function invalidGetRefundResponseProvider(): iterable
+    {
+        $valid = [
+            'refund_id' => 'rf_123',
+            'charge_id' => 'ch_123',
+            'amount_cents' => 500,
+            'status' => 'completed',
+        ];
+
+        yield 'different refund ID' => [[...$valid, 'refund_id' => 'rf_other']];
+        yield 'missing refund ID' => [[...$valid, 'refund_id' => null]];
+        yield 'missing charge ID' => [[...$valid, 'charge_id' => null]];
+        yield 'invalid amount' => [[...$valid, 'amount_cents' => 0]];
+        yield 'invalid status' => [[...$valid, 'status' => 'mystery']];
+    }
+
+    public function testListByChargeNormalizesEveryRefundWithoutInventingAmountCorrelation(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"refunds":[{"id":"rf_legacy","charge_id":"ch_123","amount":750,"status":"completed"}]}'),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $page = $resource->listByCharge('ch_123');
+
+        self::assertSame('rf_legacy', $page['refunds'][0]['refund_id']);
+        self::assertSame(750, $page['refunds'][0]['amount_cents']);
+        self::assertSame(750, $page['refunds'][0]['amount']);
+    }
+
+    #[DataProvider('invalidRefundListShapeProvider')]
+    public function testListByChargeRejectsNonListOrNonArrayRefundEntries(array $response): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode($response, JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $this->expectException(\UnexpectedValueException::class);
+        $resource->listByCharge('ch_123');
+    }
+
+    public static function invalidRefundListShapeProvider(): iterable
+    {
+        $valid = [
+            'refund_id' => 'rf_123',
+            'charge_id' => 'ch_123',
+            'amount_cents' => 500,
+            'status' => 'completed',
+        ];
+
+        yield 'associative map' => [['refunds' => ['first' => $valid]]];
+        yield 'null entry' => [['refunds' => [null]]];
+        yield 'scalar entry' => [['refunds' => ['invalid']]];
+    }
+
+    #[DataProvider('invalidRefundListEntryProvider')]
+    public function testListByChargeRejectsInvalidOrUncorrelatedRefundEntry(array $refund): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode(['refunds' => [$refund]], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $this->expectException(\UnexpectedValueException::class);
+        $resource->listByCharge('ch_123');
+    }
+
+    public static function invalidRefundListEntryProvider(): iterable
+    {
+        $valid = [
+            'refund_id' => 'rf_123',
+            'charge_id' => 'ch_123',
+            'amount_cents' => 500,
+            'status' => 'completed',
+        ];
+
+        yield 'missing refund ID' => [[...$valid, 'refund_id' => null]];
+        yield 'missing charge ID' => [[...$valid, 'charge_id' => null]];
+        yield 'different charge ID' => [[...$valid, 'charge_id' => 'ch_other']];
+        yield 'invalid amount' => [[...$valid, 'amount_cents' => 0]];
+        yield 'invalid status' => [[...$valid, 'status' => 'mystery']];
     }
 
     public function testReadsRejectUnsafeIdentifiersAndPaginationBeforeNetwork(): void

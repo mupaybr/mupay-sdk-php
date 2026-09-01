@@ -38,7 +38,8 @@ final class RefundResource
             $this->idempotencyHeader($idempotencyKey),
             fn (array $response): array => $this->validatedRefundData(
                 $response,
-                $params['amount_cents'] ?? null
+                expectedAmount: $params['amount_cents'] ?? null,
+                expectedChargeId: $chargeId
             )
         );
     }
@@ -52,7 +53,10 @@ final class RefundResource
     {
         $this->validateResourceId($refundId, 'Refund ID');
 
-        return $this->data($this->client->get('/v1/refunds/' . rawurlencode($refundId)));
+        return $this->validatedRefundData(
+            $this->client->get('/v1/refunds/' . rawurlencode($refundId)),
+            expectedRefundId: $refundId
+        );
     }
 
     /**
@@ -81,8 +85,19 @@ final class RefundResource
             '/v1/charges/' . rawurlencode($chargeId) . '/refunds',
             $query
         );
-        if (!is_array($response['refunds'] ?? null)) {
+        $refunds = $response['refunds'] ?? null;
+        if (!is_array($refunds) || !array_is_list($refunds)) {
             throw new \UnexpectedValueException('Resposta de listagem de refunds invalida.');
+        }
+        $validatedRefunds = [];
+        foreach ($refunds as $refund) {
+            if (!is_array($refund)) {
+                throw new \UnexpectedValueException('Resposta de listagem de refunds invalida.');
+            }
+            $validatedRefunds[] = $this->validatedRefund(
+                $refund,
+                expectedChargeId: $chargeId
+            );
         }
         if (isset($response['next_cursor'])
             && (!is_string($response['next_cursor'])
@@ -90,6 +105,7 @@ final class RefundResource
             throw new \UnexpectedValueException('Cursor de refunds invalido na resposta.');
         }
 
+        $response['refunds'] = $validatedRefunds;
         /** @var array{refunds: list<array<string, mixed>>, next_cursor?: string} $response */
         return $response;
     }
@@ -115,13 +131,40 @@ final class RefundResource
      * @param array<string, mixed> $response
      * @return array<string, mixed>
      */
-    private function validatedRefundData(array $response, ?int $expectedAmount): array
+    private function validatedRefundData(
+        array $response,
+        ?int $expectedAmount = null,
+        ?string $expectedRefundId = null,
+        ?string $expectedChargeId = null
+    ): array {
+        return $this->validatedRefund(
+            $this->data($response),
+            $expectedAmount,
+            $expectedRefundId,
+            $expectedChargeId
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function validatedRefund(
+        array $data,
+        ?int $expectedAmount = null,
+        ?string $expectedRefundId = null,
+        ?string $expectedChargeId = null
+    ): array
     {
-        $data = $this->data($response);
         $id = $data['refund_id'] ?? $data['id'] ?? null;
+        $chargeId = $data['charge_id'] ?? null;
         $amount = $data['amount_cents'] ?? $data['amount'] ?? null;
         if (!is_string($id) || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $id) !== 1) {
             throw new \UnexpectedValueException('Resposta 2xx sem refund_id valido.');
+        }
+        if (!is_string($chargeId)
+            || preg_match('/\A[A-Za-z0-9._~-]{1,256}\z/D', $chargeId) !== 1) {
+            throw new \UnexpectedValueException('Resposta 2xx sem charge_id de refund valido.');
         }
         if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor de refund valido.');
@@ -133,8 +176,15 @@ final class RefundResource
         if ($expectedAmount !== null && $amount !== $expectedAmount) {
             throw new \UnexpectedValueException('Resposta 2xx com valor de refund divergente.');
         }
+        if ($expectedRefundId !== null && $id !== $expectedRefundId) {
+            throw new \UnexpectedValueException('Resposta 2xx com refund_id divergente.');
+        }
+        if ($expectedChargeId !== null && $chargeId !== $expectedChargeId) {
+            throw new \UnexpectedValueException('Resposta 2xx com charge_id de refund divergente.');
+        }
 
         $data['refund_id'] = $id;
+        $data['charge_id'] = $chargeId;
         $data['amount_cents'] = $amount;
         return $data;
     }
