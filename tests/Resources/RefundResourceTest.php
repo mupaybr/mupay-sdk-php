@@ -244,6 +244,35 @@ final class RefundResourceTest extends TestCase
         );
     }
 
+    public function testCreateNormalizesReasonBeforeSendingAndCorrelating(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(202, [], '{"refund_id":"rf_123","charge_id":"ch_123","amount_cents":500,"status":"requested","reason":"customer_request","requested_at":"2026-08-31T12:00:00Z"}'),
+            new Response(202, [], '{"refund_id":"rf_124","charge_id":"ch_123","amount_cents":500,"status":"requested","requested_at":"2026-08-31T12:00:00Z"}'),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $resource->create(
+            'ch_123',
+            ['full' => true, 'reason' => "  customer_request\t"],
+            'idem_refund_trimmed'
+        );
+        $resource->create(
+            'ch_123',
+            ['full' => true, 'reason' => " \t\r\n "],
+            'idem_refund_empty'
+        );
+
+        self::assertSame(
+            ['full' => true, 'reason' => 'customer_request'],
+            json_decode((string) $http->requests()[0]->getBody(), true, 512, JSON_THROW_ON_ERROR)
+        );
+        self::assertSame(
+            ['full' => true],
+            json_decode((string) $http->requests()[1]->getBody(), true, 512, JSON_THROW_ON_ERROR)
+        );
+    }
+
     public function testCreateFullRefundDoesNotInventAmountCorrelation(): void
     {
         $http = new FakeHttpClient([

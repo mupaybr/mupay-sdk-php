@@ -33,6 +33,7 @@ final class RefundResource
     {
         $this->validateChargeId($chargeId);
         $this->validateCreateParams($params);
+        $params = $this->normalizedCreateParams($params);
         return $this->client->post(
             '/v1/charges/' . rawurlencode($chargeId) . '/refunds',
             $params,
@@ -316,5 +317,24 @@ final class RefundResource
                 || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $params['reason']) === 1)) {
             throw new \InvalidArgumentException('reason invalido para refund.');
         }
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function normalizedCreateParams(array $params): array
+    {
+        if (!array_key_exists('reason', $params)) {
+            return $params;
+        }
+
+        $reason = preg_replace('/\A[\x00-\x20]+|[\x00-\x20]+\z/D', '', $params['reason']);
+        if ($reason === null || $reason === '') {
+            unset($params['reason']);
+        } else {
+            $params['reason'] = $reason;
+        }
+        return $params;
     }
 }
