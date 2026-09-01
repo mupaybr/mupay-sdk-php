@@ -53,6 +53,7 @@ final class ChargeResource
             $this->idempotencyHeader($idempotencyKey),
             fn (array $response): array => $this->validatedChargeData(
                 $response,
+                $params['payment_method'],
                 $params['amount_cents'],
                 $couponCode
             ),
@@ -118,6 +119,7 @@ final class ChargeResource
      */
     private function validatedChargeData(
         array $response,
+        string $expectedPaymentMethod,
         int $expectedAmount,
         ?string $expectedCouponCode
     ): array
@@ -133,6 +135,12 @@ final class ChargeResource
         }
         if (!is_int($amount) || $amount < 1 || $amount > self::MAX_MONEY_CENTS) {
             throw new \UnexpectedValueException('Resposta 2xx sem valor financeiro valido.');
+        }
+        if (array_key_exists('payment_method', $data)
+            && $data['payment_method'] !== null
+            && (!is_string($data['payment_method'])
+                || !hash_equals($expectedPaymentMethod, $data['payment_method']))) {
+            throw new \UnexpectedValueException('Resposta 2xx diverge do payment_method solicitado.');
         }
         if (($expectedCouponCode !== null && $amount > $expectedAmount)
             || ($expectedCouponCode === null && $amount !== $expectedAmount)) {
@@ -287,6 +295,7 @@ final class ChargeResource
             && ($hasCardToken
                 || $hasCardTokenId
                 || array_key_exists('installments', $params)
+                || array_key_exists('product_max_installments', $params)
                 || array_key_exists('save_card', $params))) {
             throw new \InvalidArgumentException('PIX não aceita campos de cartão.');
         }
@@ -529,7 +538,7 @@ final class ChargeResource
         foreach ($value as $key => $child) {
             $compact = preg_replace('/[^a-z0-9]/', '', strtolower((string) $key));
             $sensitiveBase = (string) preg_replace(
-                '/(cvv|cvc)[0-9]+/',
+                '/(cvv|cvc|csc|cid)[0-9]+/',
                 '$1',
                 rtrim($compact, '0123456789')
             );
@@ -547,7 +556,8 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'verificationcode')
                 || str_ends_with($sensitiveBase, 'verificationvalue')
                 || str_ends_with($sensitiveBase, 'verificationnumber')
-                || str_ends_with($sensitiveBase, 'identificationnumber')) {
+                || str_ends_with($sensitiveBase, 'identificationnumber')
+                || preg_match('/(?:^|card)(?:csc|cid)(?:value|code|number)?$/', $sensitiveBase) === 1) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
             $this->rejectSensitiveFields($child, $depth + 1);

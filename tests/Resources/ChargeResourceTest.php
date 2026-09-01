@@ -170,6 +170,29 @@ final class ChargeResourceTest extends TestCase
         self::assertCount(1, $http->requests());
     }
 
+    public function testCreateRejectsConflictingPaymentMethodEcho(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(
+                200,
+                [],
+                '{"data":{"charge_id":"ch_wrong_method","status":"pending","amount_cents":9900,"payment_method":"credit_card"}}'
+            ),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->create($this->validPixChargePayload(9900), 'idem_wrong_method');
+            self::fail('Conflicting payment_method echo confirmed the mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_wrong_method', $exception->idempotencyKey());
+            self::assertInstanceOf(\UnexpectedValueException::class, $exception->getPrevious());
+            self::assertCount(1, $http->requests());
+        }
+    }
+
     #[DataProvider('conflictingCouponFirstResponseProvider')]
     public function testCreateRejectsConflictingCouponEvidenceOnFirstResponse(string $responseBody): void
     {
@@ -624,6 +647,8 @@ final class ChargeResourceTest extends TestCase
 		yield 'CVV2 key' => [['cvv2' => '123']];
 		yield 'CVC2 key' => [['cvc2' => '123']];
 		yield 'prefixed CVV key' => [['cardCvv' => '123']];
+		yield 'prefixed CSC key' => [['cardCsc' => '123']];
+		yield 'prefixed CID key' => [['cardCid' => '1234']];
 		yield 'prefixed security code key' => [['card_security_code' => '123']];
 		yield 'security value key' => [['cardSecurityValue' => '123']];
 		yield 'verification code key' => [['cardVerificationCode' => '123']];
@@ -637,6 +662,8 @@ final class ChargeResourceTest extends TestCase
 		yield 'numbered CVV value key' => [['cvv2_value' => '123']];
 		yield 'numbered CVC code key' => [['cvc2Code' => '123']];
 		yield 'numbered compound CVV key' => [['cardCvv3Number' => '123']];
+		yield 'numbered CSC value key' => [['csc2_value' => '123']];
+		yield 'numbered CID code key' => [['cid2Code' => '1234']];
 		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
 		yield 'uninterrupted numeric prefix' => [['note' => '94111111111111111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
@@ -857,6 +884,7 @@ final class ChargeResourceTest extends TestCase
         yield 'empty card token' => ['card_token', ''];
         yield 'wrong card token id type' => ['card_token_id', []];
         yield 'null installments' => ['installments', null];
+        yield 'product max installments' => ['product_max_installments', 1];
         yield 'null save card' => ['save_card', null];
     }
 
