@@ -69,6 +69,42 @@ final class OutcomeUnknownTest extends TestCase
         }
     }
 
+    /** @dataProvider unreadableDefinitiveRetryStatusProvider */
+    public function testUnreadableRetryAfterAmbiguousAttemptKeepsOutcomeUnknown(int $status): void
+    {
+        $ambiguousFailure = new NetworkFailure('Response lost after request dispatch');
+        $body = new PumpStream(static function (int $length): string|false {
+            throw new \RuntimeException('retry response body lost');
+        });
+        $http = new FakeHttpClient([
+            $ambiguousFailure,
+            new Response($status, ['Retry-After' => '0'], $body),
+        ]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry());
+
+        try {
+            $client->post(
+                '/v1/charges',
+                ['amount_cents' => 100],
+                ['Idempotency-Key' => 'sticky-unreadable-retry-key']
+            );
+            self::fail('Expected outcome unknown error.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('sticky-unreadable-retry-key', $exception->idempotencyKey());
+            self::assertSame($ambiguousFailure, $exception->getPrevious());
+            self::assertCount(2, $http->requests());
+        }
+    }
+
+    /** @return array<string, array{int}> */
+    public static function unreadableDefinitiveRetryStatusProvider(): array
+    {
+        return [
+            'unprocessable entity' => [422],
+            'exhausted rate limit' => [429],
+        ];
+    }
+
     public function testMutationTransportFailureExposesUnknownOutcomeAndSentKey(): void
     {
         $http = new FakeHttpClient([new NetworkFailure('Response lost after request dispatch')]);

@@ -553,8 +553,18 @@ final class ChargeResourceTest extends TestCase
     {
         yield 'spaces and hyphens' => [['note' => '4111 1111-1111 1111']];
         yield 'punctuation' => [['note' => '4111.1111/1111_1111']];
+		yield 'unrelated numeric prefix' => [['note' => 'order 9 / 4111 1111 1111 1111']];
         yield 'exact JSON number' => [['note' => 4_111_111_111_111_111]];
+		yield 'JSON float' => [['note' => 4_111_111_111_111_111.0]];
         yield 'nested value' => [['order' => [['note' => 'card 4111-1111-1111-1111']]]];
+		yield 'object value' => [['note' => (object) ['value' => '4111111111111111']]];
+		yield 'JsonSerializable value' => [['note' => new class implements \JsonSerializable {
+			/** @return array<string, string> */
+			public function jsonSerialize(): array
+			{
+				return ['value' => '4111111111111111'];
+			}
+		}]];
     }
 
     public function testCreateAcceptsEquivalentNonLuhnMetadataValue(): void

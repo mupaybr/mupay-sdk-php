@@ -506,20 +506,41 @@ final class ChargeResource
         }
     }
 
-    private function rejectPanValues(mixed $value, int $depth = 0): void
+    private function rejectPanValues(mixed $value): void
+    {
+        try {
+            $encoded = json_encode($value, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
+            $decoded = json_decode(
+                $encoded,
+                true,
+                512,
+                JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING
+            );
+        } catch (\JsonException $exception) {
+            throw new \InvalidArgumentException('Metadata deve ser serializavel como JSON.', previous: $exception);
+        }
+
+        $this->rejectSensitiveFields($decoded);
+        $this->rejectDecodedPanValues($decoded);
+    }
+
+    private function rejectDecodedPanValues(mixed $value, int $depth = 0): void
     {
         if ($depth > self::MAX_INPUT_NESTING_DEPTH) {
             throw new \InvalidArgumentException('Payload excede o limite de profundidade.');
         }
         if (is_array($value)) {
             foreach ($value as $child) {
-                $this->rejectPanValues($child, $depth + 1);
+                $this->rejectDecodedPanValues($child, $depth + 1);
             }
             return;
         }
         $panLike = is_string($value)
             ? $this->containsPanLikeSequence($value)
-            : (is_int($value) && $this->validPanSequence((string) $value));
+            : ((is_int($value) || is_float($value))
+                && $this->containsPanLikeSequence(
+                    json_encode($value, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION)
+                ));
         if ($panLike) {
             throw new \InvalidArgumentException('Metadata contem possivel numero de cartao.');
         }
@@ -531,28 +552,49 @@ final class ChargeResource
         if ($characters === false) {
             return false;
         }
+        $groups = [];
         $digits = '';
-        $tooLong = false;
-        $flush = function () use (&$digits, &$tooLong): bool {
-            $matched = !$tooLong && $this->validPanSequence($digits);
+        $flushGroup = function () use (&$groups, &$digits): bool {
+            if ($digits === '') {
+                return false;
+            }
+            $groups[] = $digits;
             $digits = '';
-            $tooLong = false;
-            return $matched;
+            return $this->panInDigitGroups($groups);
         };
         foreach ($characters as $character) {
             if (preg_match('/\A[0-9]\z/D', $character) === 1) {
-                if (strlen($digits) < 20) {
-                    $digits .= $character;
-                } else {
-                    $tooLong = true;
-                }
+                $digits .= $character;
             } elseif (preg_match('/\A(?:\s|\p{P})\z/uD', $character) === 1) {
-                continue;
-            } elseif ($flush()) {
-                return true;
+                if ($flushGroup()) {
+                    return true;
+                }
+            } else {
+                if ($flushGroup()) {
+                    return true;
+                }
+                $groups = [];
             }
         }
-        return $flush();
+        return $flushGroup();
+    }
+
+    /** @param list<string> $groups */
+    private function panInDigitGroups(array $groups): bool
+    {
+        foreach (array_keys($groups) as $start) {
+            $candidate = '';
+            for ($end = $start, $count = count($groups); $end < $count; $end++) {
+                if (strlen($candidate) + strlen($groups[$end]) > 19) {
+                    break;
+                }
+                $candidate .= $groups[$end];
+                if ($this->validPanSequence($candidate)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private function validPanSequence(string $digits): bool

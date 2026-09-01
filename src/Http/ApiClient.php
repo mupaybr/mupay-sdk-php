@@ -201,6 +201,9 @@ final class ApiClient
                     $attempt++;
                     continue;
                 }
+                if ($idempotencyKey !== null && $ambiguousCause !== null) {
+                    throw new OutcomeUnknownException($idempotencyKey, $ambiguousCause);
+                }
                 if ($idempotencyKey !== null && $ambiguousRead) {
                     throw new OutcomeUnknownException(
                         $idempotencyKey,
