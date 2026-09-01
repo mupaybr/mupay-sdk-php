@@ -10,6 +10,7 @@ use MuPag\Sdk\Pagination\PageIterator;
 final class ChargeResource
 {
     private const MAX_MONEY_CENTS = 9_000_000_000_000_000;
+    private const MAX_INPUT_NESTING_DEPTH = 32;
     private const ALLOWED_STATUSES = [
         'created',
         'pending',
@@ -433,17 +434,20 @@ final class ChargeResource
         );
     }
 
-    private function rejectSensitiveFields(mixed $value): void
+    private function rejectSensitiveFields(mixed $value, int $depth = 0): void
     {
         if (!is_array($value)) {
             return;
+        }
+        if ($depth > self::MAX_INPUT_NESTING_DEPTH) {
+            throw new \InvalidArgumentException('Payload excede o limite de profundidade.');
         }
         foreach ($value as $key => $child) {
             $normalized = strtolower(str_replace('-', '_', (string) $key));
             if (in_array($normalized, ['pan', 'cvv', 'cvc', 'card_number', 'cardnumber', 'security_code'], true)) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
-            $this->rejectSensitiveFields($child);
+            $this->rejectSensitiveFields($child, $depth + 1);
         }
     }
 }

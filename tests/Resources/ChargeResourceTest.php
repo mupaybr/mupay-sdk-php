@@ -369,6 +369,26 @@ final class ChargeResourceTest extends TestCase
         }
     }
 
+    public function testCreateRejectsRecursiveMetadataBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $recursive = [];
+        $recursive['self'] = &$recursive;
+        $payload = $this->validPixChargePayload(100);
+        $payload['metadata'] = $recursive;
+
+        try {
+            $resource->create($payload, 'idem_recursive_metadata');
+            self::fail('Recursive metadata was accepted.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        self::assertCount(0, $http->requests());
+    }
+
     /** @dataProvider dotSegmentCustomerIdProvider */
     public function testChargeCustomerIdentifiersRejectDotSegmentsBeforeNetwork(string $id): void
     {
