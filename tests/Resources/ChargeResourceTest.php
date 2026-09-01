@@ -384,6 +384,54 @@ final class ChargeResourceTest extends TestCase
         ]];
     }
 
+    #[DataProvider('nonOneInstallmentValueProvider')]
+    public function testCreateRejectsEachPresentNonOneInstallmentValueBeforeNetwork(
+        string $field,
+        mixed $value
+    ): void {
+        $http = new FakeHttpClient([]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+        $payload = [
+            'amount_cents' => 9900,
+            'payment_method' => 'credit_card',
+            'customer' => [
+                'id' => 'customer_123',
+                'name' => 'Ana Silva',
+                'email' => 'ana@example.com',
+                'tax_id' => '12345678901',
+            ],
+            'card_token_id' => 'token_123',
+            'payer_ip' => '203.0.113.10',
+            $field => $value,
+        ];
+
+        try {
+            $resource->create($payload, 'idem_invalid_installments');
+        } catch (\InvalidArgumentException) {
+            self::assertCount(0, $http->requests());
+            return;
+        } catch (\Throwable $exception) {
+            self::fail('Invalid installment value reached the network: ' . $exception::class);
+        }
+
+        self::fail('Invalid installment value was accepted.');
+    }
+
+    public static function nonOneInstallmentValueProvider(): iterable
+    {
+        foreach (['installments', 'product_max_installments'] as $field) {
+            yield $field . ' null' => [$field, null];
+            yield $field . ' false' => [$field, false];
+            yield $field . ' string' => [$field, '1'];
+            yield $field . ' zero' => [$field, 0];
+            yield $field . ' two' => [$field, 2];
+            yield $field . ' float' => [$field, 1.0];
+            yield $field . ' array' => [$field, []];
+        }
+    }
+
     /** @dataProvider validCardTokenProvider */
     public function testCreateCardAcceptsExactlyOneValidTokenField(string $field, string $value): void
     {
@@ -440,6 +488,7 @@ final class ChargeResourceTest extends TestCase
 
         $payload = json_decode((string) $http->lastRequest()->getBody(), true, flags: JSON_THROW_ON_ERROR);
         self::assertSame('2001:db8::1', $payload['payer_ip']);
+        self::assertSame(1, $payload['installments']);
         self::assertSame(1, $payload['product_max_installments']);
     }
 

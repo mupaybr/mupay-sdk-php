@@ -301,6 +301,60 @@ final class RefundResourceTest extends TestCase
         self::assertSame(750, $page['refunds'][0]['amount']);
     }
 
+    #[DataProvider('terminalRefundCursorProvider')]
+    public function testListByChargeTreatsMissingNullAndEmptyCursorAsTerminal(array $pagination): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode([
+                'refunds' => [[
+                    'refund_id' => 'rf_terminal',
+                    'charge_id' => 'ch_123',
+                    'amount_cents' => 500,
+                    'status' => 'completed',
+                ]],
+                ...$pagination,
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $page = $resource->listByCharge('ch_123');
+
+        self::assertSame('rf_terminal', $page['refunds'][0]['refund_id']);
+        self::assertSame($pagination, array_intersect_key($page, ['next_cursor' => true]));
+        self::assertCount(1, $http->requests());
+    }
+
+    public static function terminalRefundCursorProvider(): iterable
+    {
+        yield 'missing' => [[]];
+        yield 'null' => [['next_cursor' => null]];
+        yield 'empty string' => [['next_cursor' => '']];
+    }
+
+    #[DataProvider('invalidRefundCursorProvider')]
+    public function testListByChargeRejectsInvalidResponseCursor(mixed $cursor): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], json_encode([
+                'refunds' => [],
+                'next_cursor' => $cursor,
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(new ApiClient('sk_test_123', 'https://api.test', $http));
+
+        $this->expectException(\UnexpectedValueException::class);
+        $resource->listByCharge('ch_123');
+    }
+
+    public static function invalidRefundCursorProvider(): iterable
+    {
+        yield 'boolean' => [false];
+        yield 'integer' => [1];
+        yield 'array' => [[]];
+        yield 'object-shaped map' => [['value' => 'cursor_2']];
+        yield 'space' => ['bad cursor'];
+    }
+
     #[DataProvider('invalidRefundListShapeProvider')]
     public function testListByChargeRejectsNonListOrNonArrayRefundEntries(array $response): void
     {

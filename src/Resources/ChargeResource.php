@@ -164,11 +164,11 @@ final class ChargeResource
             && (!is_string($params['soft_descriptor']) || $params['soft_descriptor'] !== '')) {
             throw new \InvalidArgumentException('soft_descriptor não é suportado pelo PSP Asaas.');
         }
-        if (isset($params['installments'])
+        if (array_key_exists('installments', $params)
             && (!is_int($params['installments']) || $params['installments'] !== 1)) {
             throw new \InvalidArgumentException('installments deve ser 1 quando informado.');
         }
-        if (isset($params['product_max_installments'])
+        if (array_key_exists('product_max_installments', $params)
             && (!is_int($params['product_max_installments']) || $params['product_max_installments'] !== 1)) {
             throw new \InvalidArgumentException('product_max_installments deve ser 1 quando informado.');
         }

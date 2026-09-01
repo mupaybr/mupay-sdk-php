@@ -99,9 +99,11 @@ final class RefundResource
                 expectedChargeId: $chargeId
             );
         }
-        if (isset($response['next_cursor'])
+        if (array_key_exists('next_cursor', $response)
+            && $response['next_cursor'] !== null
             && (!is_string($response['next_cursor'])
-                || preg_match('/\A[\x21-\x7E]{1,256}\z/D', $response['next_cursor']) !== 1)) {
+                || ($response['next_cursor'] !== ''
+                    && preg_match('/\A[\x21-\x7E]{1,256}\z/D', $response['next_cursor']) !== 1))) {
             throw new \UnexpectedValueException('Cursor de refunds invalido na resposta.');
         }
 
