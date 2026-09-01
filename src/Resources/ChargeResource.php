@@ -543,9 +543,11 @@ final class ChargeResource
                 || str_ends_with($sensitiveBase, 'cvvnumber')
                 || str_ends_with($sensitiveBase, 'cvcnumber')
                 || str_ends_with($sensitiveBase, 'securitycode')
+                || str_ends_with($sensitiveBase, 'securityvalue')
                 || str_ends_with($sensitiveBase, 'verificationcode')
                 || str_ends_with($sensitiveBase, 'verificationvalue')
-                || str_ends_with($sensitiveBase, 'verificationnumber')) {
+                || str_ends_with($sensitiveBase, 'verificationnumber')
+                || str_ends_with($sensitiveBase, 'identificationnumber')) {
                 throw new \InvalidArgumentException('Dados brutos de cartão não são aceitos.');
             }
             $this->rejectSensitiveFields($child, $depth + 1);
