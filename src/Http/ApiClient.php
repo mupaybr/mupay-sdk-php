@@ -162,6 +162,9 @@ final class ApiClient
                 $attempt++;
                 continue;
             } catch (ClientExceptionInterface $exception) {
+                if ($idempotencyKey !== null && $ambiguousCause !== null) {
+                    throw new OutcomeUnknownException($idempotencyKey, $ambiguousCause);
+                }
                 throw new ApiException('Falha ao chamar a API MuPag.', 0, previous: $exception);
             }
 

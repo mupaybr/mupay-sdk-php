@@ -41,6 +41,34 @@ final class OutcomeUnknownTest extends TestCase
         }
     }
 
+    public function testMutationRequestExceptionAfterAmbiguousAttemptKeepsOutcomeUnknown(): void
+    {
+        $ambiguousFailure = new NetworkFailure('Response lost after request dispatch');
+        $definitiveFailure = new RequestException(
+            'Retry request rejected before dispatch',
+            new Request('POST', 'https://api.test.local/v1/charges')
+        );
+        $http = new FakeHttpClient([$ambiguousFailure, $definitiveFailure]);
+        $client = new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry());
+
+        try {
+            $client->post(
+                '/v1/charges',
+                ['amount_cents' => 100],
+                ['Idempotency-Key' => 'sticky-request-error-key']
+            );
+            self::fail('Expected outcome unknown error.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('sticky-request-error-key', $exception->idempotencyKey());
+            self::assertSame($ambiguousFailure, $exception->getPrevious());
+            self::assertCount(2, $http->requests());
+            self::assertSame(
+                $http->requests()[0]->getHeaderLine('Idempotency-Key'),
+                $http->requests()[1]->getHeaderLine('Idempotency-Key')
+            );
+        }
+    }
+
     public function testMutationTransportFailureExposesUnknownOutcomeAndSentKey(): void
     {
         $http = new FakeHttpClient([new NetworkFailure('Response lost after request dispatch')]);
