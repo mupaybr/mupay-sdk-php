@@ -33,6 +33,40 @@ final class SubscriptionResourceTest extends TestCase
         );
     }
 
+    public function testCancelRejectsPanReasonBeforeNetwork(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"id":"sub_123","status":"canceled","cancel_at_period_end":false}}'),
+        ]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        try {
+            $resource->cancel('sub_123', 'immediate', 'customer 4111-1111-1111-1111');
+            self::fail('PAN-like cancellation reason reached the HTTP client.');
+        } catch (\InvalidArgumentException) {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public function testCancelAcceptsNumericNonLuhnReason(): void
+    {
+        $http = new FakeHttpClient([
+            new Response(200, [], '{"data":{"id":"sub_123","status":"canceled","cancel_at_period_end":false}}'),
+        ]);
+        $resource = new SubscriptionResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, RetryPolicy::none())
+        );
+
+        $resource->cancel('sub_123', 'immediate', '8777777777771013');
+
+        self::assertSame(
+            '{"mode":"immediate","reason":"8777777777771013"}',
+            (string) $http->lastRequest()->getBody()
+        );
+    }
+
     public function testCancelTreatsMismatchedResponseIdAsOutcomeUnknown(): void
     {
         $http = new FakeHttpClient([

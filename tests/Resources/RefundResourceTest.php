@@ -341,6 +341,106 @@ final class RefundResourceTest extends TestCase
         );
     }
 
+    #[DataProvider('refundPanInputProvider')]
+    public function testRefundInputsRejectPanBeforeNetwork(string $operation): void
+    {
+        $pan = '4111111111111111';
+        $responsePayload = match ($operation) {
+            'create charge ID' => [
+                'refund_id' => 'rf_123', 'charge_id' => $pan, 'amount_cents' => 500,
+                'status' => 'completed', 'requested_at' => '2026-08-31T12:00:00Z',
+            ],
+            'get refund ID' => [
+                'refund_id' => $pan, 'charge_id' => 'ch_123', 'amount_cents' => 500,
+                'status' => 'completed', 'requested_at' => '2026-08-31T12:00:00Z',
+            ],
+            'list charge ID' => ['refunds' => []],
+            'reason' => [
+                'refund_id' => 'rf_123', 'charge_id' => 'ch_123', 'amount_cents' => 500,
+                'status' => 'completed', 'reason' => 'customer ' . $pan,
+                'requested_at' => '2026-08-31T12:00:00Z',
+            ],
+            default => self::fail('Unknown test operation.'),
+        };
+        $responseBody = json_encode($responsePayload, JSON_THROW_ON_ERROR);
+        $http = new FakeHttpClient([new Response(200, [], $responseBody)]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        try {
+            match ($operation) {
+                'create charge ID' => $resource->create($pan, ['amount_cents' => 500]),
+                'get refund ID' => $resource->get($pan),
+                'list charge ID' => $resource->listByCharge($pan),
+                'reason' => $resource->create(
+                    'ch_123',
+                    ['amount_cents' => 500, 'reason' => 'customer ' . $pan]
+                ),
+                default => self::fail('Unknown test operation.'),
+            };
+            self::fail('PAN-like refund input reached the HTTP client.');
+        } catch (\InvalidArgumentException) {
+            self::assertCount(0, $http->requests());
+        }
+    }
+
+    public static function refundPanInputProvider(): iterable
+    {
+        yield 'create charge ID' => ['create charge ID'];
+        yield 'get refund ID' => ['get refund ID'];
+        yield 'list charge ID' => ['list charge ID'];
+        yield 'reason' => ['reason'];
+    }
+
+    public function testRefundInputsAcceptNumericNonLuhnValues(): void
+    {
+        $nonLuhn = '8777777777771013';
+        $http = new FakeHttpClient([
+            new Response(201, [], json_encode([
+                'refund_id' => 'rf_create',
+                'charge_id' => $nonLuhn,
+                'amount_cents' => 500,
+                'status' => 'completed',
+                'requested_at' => '2026-08-31T12:00:00Z',
+            ], JSON_THROW_ON_ERROR)),
+            new Response(200, [], json_encode([
+                'refund_id' => $nonLuhn,
+                'charge_id' => 'ch_123',
+                'amount_cents' => 500,
+                'status' => 'completed',
+                'requested_at' => '2026-08-31T12:00:00Z',
+            ], JSON_THROW_ON_ERROR)),
+            new Response(200, [], json_encode([
+                'refunds' => [[
+                    'refund_id' => 'rf_list',
+                    'charge_id' => $nonLuhn,
+                    'amount_cents' => 500,
+                    'status' => 'completed',
+                    'requested_at' => '2026-08-31T12:00:00Z',
+                ]],
+            ], JSON_THROW_ON_ERROR)),
+            new Response(201, [], json_encode([
+                'refund_id' => 'rf_reason',
+                'charge_id' => 'ch_123',
+                'amount_cents' => 500,
+                'status' => 'completed',
+                'reason' => $nonLuhn,
+                'requested_at' => '2026-08-31T12:00:00Z',
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $resource = new RefundResource(
+            new ApiClient('sk_test_123', 'https://api.test', $http, RetryPolicy::none())
+        );
+
+        $resource->create($nonLuhn, ['amount_cents' => 500]);
+        $resource->get($nonLuhn);
+        $resource->listByCharge($nonLuhn);
+        $resource->create('ch_123', ['amount_cents' => 500, 'reason' => $nonLuhn]);
+
+        self::assertCount(4, $http->requests());
+    }
+
     public function testCreateFullRefundDoesNotInventAmountCorrelation(): void
     {
         $http = new FakeHttpClient([

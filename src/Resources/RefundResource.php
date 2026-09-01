@@ -278,7 +278,7 @@ final class RefundResource
 
     private function validateResourceId(string $value, string $field): void
     {
-        if (!$this->validResourceId($value)) {
+        if (!$this->validResourceId($value) || $this->containsPanLikeSequence($value)) {
             throw new \InvalidArgumentException($field . ' invalido.');
         }
     }
@@ -341,9 +341,83 @@ final class RefundResource
         if (array_key_exists('reason', $params)
             && (!is_string($params['reason'])
                 || strlen($params['reason']) > 500
-                || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $params['reason']) === 1)) {
+                || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $params['reason']) === 1
+                || $this->containsPanLikeSequence($params['reason']))) {
             throw new \InvalidArgumentException('reason invalido para refund.');
         }
+    }
+
+    private function containsPanLikeSequence(string $value): bool
+    {
+        $digits = '';
+        $appendDigit = function (string $digit) use (&$digits): bool {
+            if (strlen($digits) === 19) {
+                $digits = substr($digits, 1);
+            }
+            $digits .= $digit;
+            for ($length = 12, $retained = strlen($digits); $length <= $retained; $length++) {
+                if ($this->validPanSequence(substr($digits, -$length))) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        for ($offset = 0, $byteLength = strlen($value); $offset < $byteLength;) {
+            $byte = ord($value[$offset]);
+            if ($byte >= 48 && $byte <= 57) {
+                if ($appendDigit($value[$offset])) {
+                    return true;
+                }
+                $offset++;
+                continue;
+            }
+            if ($byte < 0x80) {
+                $offset++;
+                if ($this->isAsciiPanSeparator($byte)) {
+                    continue;
+                }
+                $digits = '';
+                continue;
+            }
+            if (preg_match('/\G./us', $value, $match, 0, $offset) !== 1) {
+                return false;
+            }
+            $character = $match[0];
+            $offset += strlen($character);
+            if (preg_match('/\A(?:\s|\p{P}|\p{S}|\p{M}|\p{Cf})\z/uD', $character) === 1) {
+                continue;
+            }
+            $digits = '';
+        }
+        return false;
+    }
+
+    private function isAsciiPanSeparator(int $byte): bool
+    {
+        return !(($byte >= 65 && $byte <= 90) || ($byte >= 97 && $byte <= 122));
+    }
+
+    private function validPanSequence(string $digits): bool
+    {
+        $length = strlen($digits);
+        if ($length < 12 || $length > 19 || preg_match('/\A[0-9]+\z/D', $digits) !== 1) {
+            return false;
+        }
+        $sum = 0;
+        $doubleDigit = false;
+        for ($index = $length - 1; $index >= 0; $index--) {
+            $digit = ord($digits[$index]) - 48;
+            if ($doubleDigit) {
+                $digit *= 2;
+                if ($digit > 9) {
+                    $digit -= 9;
+                }
+            }
+            $sum += $digit;
+            $doubleDigit = !$doubleDigit;
+        }
+        return $sum % 10 === 0;
     }
 
     /**
