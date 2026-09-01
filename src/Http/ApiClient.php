@@ -80,16 +80,26 @@ final class ApiClient
      * Executa POST em JSON e garante idempotencia quando o caller nao informou chave.
      *
      * @param null|callable(array<string, mixed>): array<string, mixed> $responseValidator
+     * @param null|callable(array<string, mixed>): array<string, mixed> $ambiguousResponseValidator
      * @return array<string, mixed>
      */
     public function post(
         string $path,
         ?array $payload = null,
         array $headers = [],
-        ?callable $responseValidator = null
+        ?callable $responseValidator = null,
+        ?callable $ambiguousResponseValidator = null
     ): array
     {
-        return $this->request('POST', $path, $payload, [], $headers, $responseValidator);
+        return $this->request(
+            'POST',
+            $path,
+            $payload,
+            [],
+            $headers,
+            $responseValidator,
+            $ambiguousResponseValidator
+        );
     }
 
     /**
@@ -107,6 +117,7 @@ final class ApiClient
      * @param array<string, mixed> $query
      * @param array<string, string> $headers
      * @param null|callable(array<string, mixed>): array<string, mixed> $responseValidator
+     * @param null|callable(array<string, mixed>): array<string, mixed> $ambiguousResponseValidator
      * @return array<string, mixed>
      */
     private function request(
@@ -115,7 +126,8 @@ final class ApiClient
         ?array $payload,
         array $query,
         array $headers,
-        ?callable $responseValidator = null
+        ?callable $responseValidator = null,
+        ?callable $ambiguousResponseValidator = null
     ): array {
         try {
             $body = $payload === null ? null : json_encode($payload, JSON_THROW_ON_ERROR);
@@ -221,6 +233,9 @@ final class ApiClient
                 $result = $this->handleResponse($response);
                 if ($responseValidator !== null) {
                     $result = $responseValidator($result);
+                }
+                if ($ambiguousCause !== null && $ambiguousResponseValidator !== null) {
+                    $result = $ambiguousResponseValidator($result);
                 }
 
                 return $result;

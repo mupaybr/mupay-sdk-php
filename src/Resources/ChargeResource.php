@@ -42,6 +42,10 @@ final class ChargeResource
     public function create(array $params, ?string $idempotencyKey = null): array
     {
         $this->validateCreateParams($params);
+        $couponCode = null;
+        if (is_string($params['coupon_code'] ?? null) && trim($params['coupon_code']) !== '') {
+            $couponCode = $params['coupon_code'];
+        }
         return $this->client->post(
             '/v1/charges',
             $params,
@@ -49,7 +53,12 @@ final class ChargeResource
             fn (array $response): array => $this->validatedChargeData(
                 $response,
                 $params['amount_cents'],
-                is_string($params['coupon_code'] ?? null) && trim($params['coupon_code']) !== ''
+                $couponCode !== null
+            ),
+            $couponCode === null ? null : fn (array $data): array => $this->validatedAmbiguousCouponData(
+                $data,
+                $params['amount_cents'],
+                $couponCode
             )
         );
     }
@@ -127,6 +136,45 @@ final class ChargeResource
 
         $data['charge_id'] = $id;
         $data['amount_cents'] = $amount;
+        return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function validatedAmbiguousCouponData(
+        array $data,
+        int $expectedAmount,
+        string $expectedCouponCode
+    ): array {
+        if (($data['amount_cents'] ?? null) === $expectedAmount) {
+            return $data;
+        }
+
+        $hasEvidence = false;
+        if (array_key_exists('coupon_code', $data)) {
+            if (!is_string($data['coupon_code'])
+                || !hash_equals($expectedCouponCode, $data['coupon_code'])) {
+                throw new \UnexpectedValueException('Resposta 2xx diverge do coupon_code solicitado.');
+            }
+            $hasEvidence = true;
+        }
+        foreach (['original_amount_cents', 'amount_subtotal_cents'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            if (!is_int($data[$field]) || $data[$field] !== $expectedAmount) {
+                throw new \UnexpectedValueException('Resposta 2xx diverge do valor anterior ao desconto.');
+            }
+            $hasEvidence = true;
+        }
+        if (!$hasEvidence) {
+            throw new \UnexpectedValueException(
+                'Resposta 2xx descontada nao correlaciona cupom apos tentativa ambigua.'
+            );
+        }
+
         return $data;
     }
 

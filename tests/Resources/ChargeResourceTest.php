@@ -9,6 +9,7 @@ use MuPag\Sdk\Http\ApiClient;
 use MuPag\Sdk\Http\RetryPolicy;
 use MuPag\Sdk\Resources\ChargeResource;
 use MuPag\Sdk\Tests\Support\FakeHttpClient;
+use MuPag\Sdk\Tests\Support\NetworkFailure;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -146,6 +147,79 @@ final class ChargeResourceTest extends TestCase
         self::assertSame('under_review', $charge['status']);
         self::assertSame(4900, $charge['amount_cents']);
         self::assertCount(1, $http->requests());
+    }
+
+    #[DataProvider('uncorrelatedCouponRetryResponseProvider')]
+    public function testCreateKeepsOutcomeUnknownWhenAmbiguousRetryReturnsUncorrelatedCouponDiscount(
+        string $responseBody
+    ): void {
+        $http = new FakeHttpClient([
+            new NetworkFailure('Response lost after request dispatch'),
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['coupon_code'] = 'SAVE50';
+
+        try {
+            $resource->create($payload, 'idem_ambiguous_coupon');
+            self::fail('Uncorrelated coupon discount confirmed an ambiguous mutation.');
+        } catch (OutcomeUnknownException $exception) {
+            self::assertSame('idem_ambiguous_coupon', $exception->idempotencyKey());
+            self::assertInstanceOf(NetworkFailure::class, $exception->getPrevious());
+            self::assertCount(2, $http->requests());
+        }
+    }
+
+    public static function uncorrelatedCouponRetryResponseProvider(): iterable
+    {
+        yield 'missing evidence' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900}}',
+        ];
+        yield 'different coupon' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"coupon_code":"OTHER"}}',
+        ];
+        yield 'different original amount' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"original_amount_cents":10000}}',
+        ];
+        yield 'contradictory evidence' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"coupon_code":"OTHER","original_amount_cents":9900}}',
+        ];
+    }
+
+    #[DataProvider('correlatedCouponRetryResponseProvider')]
+    public function testCreateAcceptsCorrelatedCouponDiscountAfterAmbiguousRetry(string $responseBody): void
+    {
+        $http = new FakeHttpClient([
+            new NetworkFailure('Response lost after request dispatch'),
+            new Response(200, [], $responseBody),
+        ]);
+        $resource = new ChargeResource(
+            new ApiClient('sk_test_123', 'https://api.test.local', $http, $this->oneRetry())
+        );
+        $payload = $this->validPixChargePayload(9900);
+        $payload['coupon_code'] = 'SAVE50';
+
+        $charge = $resource->create($payload, 'idem_correlated_coupon');
+
+        self::assertSame('ch_coupon', $charge['charge_id']);
+        self::assertSame(4900, $charge['amount_cents']);
+        self::assertCount(2, $http->requests());
+    }
+
+    public static function correlatedCouponRetryResponseProvider(): iterable
+    {
+        yield 'applied coupon echo' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"coupon_code":"SAVE50"}}',
+        ];
+        yield 'original amount echo' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"original_amount_cents":9900}}',
+        ];
+        yield 'subtotal amount echo' => [
+            '{"data":{"charge_id":"ch_coupon","status":"under_review","amount_cents":4900,"amount_subtotal_cents":9900}}',
+        ];
     }
 
     public function testAllReturnsIteratorAcrossPages(): void
@@ -916,5 +990,11 @@ final class ChargeResourceTest extends TestCase
                 'tax_id' => '12345678901',
             ],
         ];
+    }
+
+    private function oneRetry(): RetryPolicy
+    {
+        return new RetryPolicy(1, 0, static function (int $delayMs): void {
+        });
     }
 }
