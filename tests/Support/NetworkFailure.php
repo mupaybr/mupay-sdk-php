@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Tests\Support;
+namespace MuPag\Sdk\Tests\Support;
 
 use GuzzleHttp\Psr7\Request;
 use Psr\Http\Client\NetworkExceptionInterface;

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk\Exception;
+namespace MuPag\Sdk\Exception;
 
-class ApiException extends MupayException
+class ApiException extends MuPagException
 {
     public function __construct(
         string $message,

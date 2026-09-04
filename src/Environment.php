@@ -2,18 +2,18 @@
 
 declare(strict_types=1);
 
-namespace Mupay\Sdk;
+namespace MuPag\Sdk;
 
 enum Environment: string
 {
     case Test = 'test';
-    case Live = 'live';
+    case Prd = 'prd';
 
     public function baseUrl(): string
     {
         return match ($this) {
-            self::Test => 'https://api.sandbox.mupay.com',
-            self::Live => 'https://api.mupay.com',
+            self::Test => 'https://api.sandbox.mupag.com.br',
+            self::Prd => 'https://api.mupag.com.br',
         };
     }
 }
